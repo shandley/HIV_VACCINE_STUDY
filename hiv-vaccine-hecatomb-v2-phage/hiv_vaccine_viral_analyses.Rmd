@@ -1,0 +1,1274 @@
+---
+title: "hiv vaccine phage analyses"
+author: "Rachel Rodgers"
+date: "5/12/2021"
+output: 
+  html_document:
+      code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=8,
+                      fig.height=6,
+                      warning = FALSE,
+                      message = FALSE)
+```
+
+```{r load-libraries, message=FALSE}
+library("phyloseq");packageVersion('phyloseq')
+library("vegan");packageVersion("vegan")
+library("gridExtra");packageVersion("gridExtra")
+library("microbiome");packageVersion('microbiome')
+library("ggrepel");packageVersion('ggrepel')
+library("ggpubr");packageVersion('ggpubr')
+library("scales");packageVersion('scales')
+library("tidyverse");packageVersion('tidyverse')
+
+###
+library("cowplot"); packageVersion("cowplot")
+library("rstatix"); packageVersion("rstatix")
+
+
+source("./shared_R_scripts/Helper_Functions.R")
+```
+
+```{r load-data, results='hide'}
+physeqPhage <- readRDS("./data/RData_Objects/physeqPhage.RDS")
+physeqPhage # 685 x 147
+```
+
+## Overview {.tabset}
+
+---
+
+Comparisons of interest:
+
+    * Uganda vs. US (V2)
+    * Uganda vs. US vs. Rwanda (V9)
+    * Groups 1-8 by location (V2 & V9)
+    * Placebo vs. vaccine group by location (V2 & V9)
+---
+
+```{r subsetPhyseq, results='hide'}
+# Subset physeqPhage by visit_description
+physeqPhageV2 <- physeqPhage %>% 
+    subset_samples(visit_description == "V2 STOOL COLLECTION") %>% 
+    RemoveMissingTaxa()
+physeqPhageV2 # 527 x 45
+
+physeqPhageV9 <- physeqPhage %>% 
+    subset_samples(visit_description == "V9 STOOL COLLECTION") %>% 
+    RemoveMissingTaxa()
+physeqPhageV9 # 672 x 102
+
+physeqSubsetList <- list("V2" = physeqPhageV2, "V9" = physeqPhageV9)
+```
+
+### **Alpha Diversity by Location**--Rachel edited
+
+```{r alphaDiversityList}
+AddAlphaDiv <- function(physeqObj) {
+    # Add alpha diversity measures for richness & shannon diversity to sample data
+    # Access sample data slot on given physeqObj
+    sampleData <- as(sample_data(physeqObj), "data.frame")
+    # Calculate alpha diversity 
+    alphaDiv <- microbiome::alpha(physeqObj, index = c("observed",
+                                                       "diversity_shannon"))
+    # Combine back with sample data
+    sampleDataPhage <- merge(alphaDiv, sampleData, by = "row.names",
+                             all = TRUE)
+}
+
+alphaDiversityList <- map(.x = physeqSubsetList, .f = ~ AddAlphaDiv(.x))
+
+alphaIdxList <- list("Phage Richness" = "observed",
+                     "Phage Shannon Diversity" = "diversity_shannon")
+```
+
+```{r plot-alpha-diversity-V2, fig.width=8, fig.height=6}
+# V2
+
+alphaPlotsV2 <- pmap(.l = list(yVar = alphaIdxList, yLab = names(alphaIdxList)),
+                     .f = PlotAlphaDiversity,
+                     df = alphaDiversityList$V2,
+                     xVar = "location",
+                     statMethod = "wilcox.test")
+
+
+
+alphaPlotsV2Arr <- annotate_figure(ggarrange(plotlist = alphaPlotsV2,
+                                             ncol = 2, nrow = 1),
+                                   top = text_grob("Alpha Diversity by Location (V2)",
+                                                   size = 14))
+alphaPlotsV2Arr
+```
+
+
+### **Alpha Diversity by Location(Early Vaccination)**--Yuhao edited
+```{r alpha-diversity-group,v2, fig.width=8, fig.height=4}
+#Make a boxplot of samples richness and diversity, grouped by region site
+
+regioncolor <- c("Uganda" ="#00468BFF", "Rwanda" = "#42B540FF", "US" = "#ED0000FF")
+
+phage_richnessPlot_V2 <- ggplot(alphaDiversityList$V2,
+                       aes(x = location, y = observed)) +
+  scale_color_manual(values=regioncolor)+
+  geom_jitter(aes(color = location), alpha = 0.65,
+                position = position_jitter(width = 0.3)) +
+  geom_boxplot(aes(color = location), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Phage Richness") +
+  xlab(" ") +
+  #ggtitle("Richness (V2)") +
+  theme_pubr() +
+  #facet_wrap(~region) +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))+
+  stat_compare_means(comparisons = list(c("Uganda", "US")), vjust = 0,label = "p.signif",label.y = 200, label.x = 1.5)
+
+phage_diversityPlot_V2 <- ggplot(alphaDiversityList$V2,
+                        aes(x = location, y = diversity_shannon)) +
+    scale_color_manual(values=regioncolor)+
+                        geom_jitter(aes(color = location), alpha = 0.65,cposition = position_jitter(width = 0.3)) +
+                        geom_boxplot(aes(color = location), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Phage Shannon Diversity") +
+  xlab(" ") +
+  #ggtitle("Shannon Diversity (V2)") +
+  theme_pubr() +
+  #facet_wrap(~region) +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))+
+   stat_compare_means(comparisons = list(c("Uganda", "US")), vjust = 0,label = "p.signif",label.y = 5.25,label.x = 4)
+
+a <- plot_grid(NULL,phage_richnessPlot_V2,ncol = 1 ,rel_heights = c(.1,1))
+b <- plot_grid(NULL,phage_diversityPlot_V2,ncol = 1 ,rel_heights = c(.1,1))
+
+phage_a_diversity_v2 <- plot_grid(a,NULL, b,  ncol = 3, labels = c("B", "", ""), rel_widths = c(1,0.1,1)) 
+ 
+phage_a_diversity_v2 
+```
+<br>
+
+---
+
+<br>
+
+### **Alpha Diversity by Location**--Rachel edited
+```{r plot-alpha-diversity-V9, fig.width=8, fig.height=6}
+# V9
+alphaPlotsV9 <- pmap(.l = list(yVar = alphaIdxList, yLab = names(alphaIdxList)),
+                     .f = PlotAlphaDiversity,
+                     df = alphaDiversityList$V9,
+                     xVar = "location",
+                     statMethod = "kruskal.test")
+
+alphaPlotsV9Arr <- annotate_figure(ggarrange(plotlist = alphaPlotsV9,
+                                             ncol = 2, nrow = 1),
+                                   top = text_grob("Alpha Diversity by Location (V9)",
+                                                   size = 14))
+alphaPlotsV9Arr
+```
+<br>
+<br>
+<br>
+### **Alpha Diversity by Location(Late Vaccination)**--Yuhao edited
+```{r alpha-diversity-group,v9, fig.width=8, fig.height=4}
+
+# kruskal-dunn_test
+regioncolor <- c("Uganda" ="#00468BFF", "Rwanda" = "#42B540FF", "US" = "#ED0000FF")
+
+res.kruskal_richness_Day_V9_region <- alphaDiversityList$V9 %>% kruskal_test(observed ~ location)
+res.kruskal_richness_Day_V9_region
+
+pwc_richness_Day_V9_region <- alphaDiversityList$V9  %>%
+  dunn_test(observed ~ location, p.adjust.method = "BH") 
+
+pwc_richness_Day_V9_region  <- pwc_richness_Day_V9_region %>% add_xy_position(x = "location")
+pwc_richness_Day_V9_region
+
+res.kruskal_Shannon_Day_V9_region <- alphaDiversityList$V9 %>% kruskal_test(diversity_shannon~ location)
+res.kruskal_Shannon_Day_V9_region
+
+pwc_Shannon_Day_V9_region <- alphaDiversityList$V9 %>% dunn_test(diversity_shannon ~ location, p.adjust.method = "BH") 
+
+pwc_Shannon_Day_V9_region <- pwc_Shannon_Day_V9_region %>% add_xy_position(x = "location")
+
+pwc_Shannon_Day_V9_region 
+
+# Make a boxplot of samples' richness and diversity, grouped by region site
+my_comparisons <- list(c("Uganda", "US"), c("Rwanda", "Uganda"), c("Rwanda", "US"))
+
+phage_richnessPlot_V9 <- ggplot(alphaDiversityList$V9,
+                       aes(x = location, y = observed)) + ylim(0,300)+
+    scale_color_manual(values=regioncolor)+
+  #geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = location), alpha = 0.65,
+                position = position_jitter(width = 0.3)) +
+  geom_boxplot(aes(color = location), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Phage Richness") +
+  xlab(" ") +
+  #ggtitle("Richness (V9)") +
+  theme_pubr() +
+  #facet_wrap(~region) +
+  theme(plot.title = element_text(hjust = 0.5, vjust = 1.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))+
+    theme(plot.subtitle = element_text(size = 8))  +
+  stat_compare_means(comparisons = my_comparisons, label = "p.signif", label.y = c(230, 260, 290))+
+  #stat_compare_means(label.y = 650,label.x = 1.2)
+  #stat_pvalue_manual(pwc_richness_Day_V9_region, hide.ns = TRUE)+
+  labs(
+    #subtitle = get_test_label(res.kruskal_richness_Day_V9_region, detailed = TRUE),
+    #caption = get_pwc_label(pwc_richness_Day_V9_region)
+    )
+
+
+
+phage_diversityPlot_V9 <- ggplot(alphaDiversityList$V9,
+                        aes(x = location, y = diversity_shannon)) +
+    scale_color_manual(values=regioncolor)+
+                        geom_jitter(aes(color = location), alpha = 0.65,cposition = position_jitter(width = 0.3)) +
+                        geom_boxplot(aes(color = location), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Phage Shannon Diversity") +
+  xlab(" ") +
+  #ggtitle("Shannon Diversity (V9)") +
+  theme_pubr() +
+  #facet_wrap(~region) +
+  theme(plot.title = element_text(hjust = 0.5, vjust = 1.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))+
+  theme(plot.subtitle = element_text(size = 8))  + 
+  stat_compare_means(comparisons = my_comparisons, label = "p.signif")+
+   #stat_compare_means(label.y = 6.5,label.x = 1.2)
+    #stat_pvalue_manual(pwc_Shannon_Day_V9_region, hide.ns = TRUE)+
+  labs(
+    #subtitle = get_test_label(res.kruskal_richness_Day_V9_region, detailed = TRUE),
+    #caption = get_pwc_label(pwc_Shannon_Day_V9_region)
+    )
+
+a9 <- plot_grid(NULL,phage_richnessPlot_V9,ncol = 1 ,rel_heights = c(.1,1))
+b9 <- plot_grid(NULL,phage_diversityPlot_V9,ncol = 1 ,rel_heights = c(.1,1))
+
+phage_a_diversity_v9 <- plot_grid(a9, NULL, b9, ncol = 3, labels = c("B", "", ""), rel_widths = c(1,0.1, 1))
+
+phage_a_diversity_v9
+```
+
+
+### **Alpha Diversity by Location & Group**--Rachel edited
+```{r plot-alpha-by-group-location-V2, fig.width=9, fig.height=8.5}
+richnessV2LocationGroup <- PlotAlphaDiversity(df = alphaDiversityList$V2,
+                                              xVar = "group",
+                                              yVar = "observed", 
+                                              yLabel = "Richness",
+                                              statMethod = "kruskal.test",
+                                              alphaPlotTitle = "Richness by Location & Group (V2)",
+                                              facetFormula = "~ location",
+                                              facetCol = 2, facetRow = 1)
+#richnessV2Location
+
+diversityV2LocationGroup <- PlotAlphaDiversity(df = alphaDiversityList$V2,
+                                               xVar = "group",
+                                               yVar = "diversity_shannon",
+                                               yLabel = "Shannon Diversity",
+                                               statMethod = "kruskal.test",
+                                               alphaPlotTitle = "Diversity by Location & Group (V2)",
+                                               facetFormula = "~ location",
+                                               facetCol = 2, facetRow = 1)
+
+ggarrange(plotlist = list(richnessV2LocationGroup, diversityV2LocationGroup),
+          ncol = 1, nrow = 2)
+```
+<br>
+
+
+### alpha-diversity analysis between different groups from V2 stool samples--Yuhao edited
+```{r alpha-diversity-group,V2,UG US, fig.width=11, fig.height=5}
+
+res.kruskal_richness_Day_V2_location <- alphaDiversityList$V2 %>% group_by(location) %>% kruskal_test(observed ~ group)
+res.kruskal_richness_Day_V2_location
+
+pwc_richness_Day_V2_location <- alphaDiversityList$V2  %>% group_by(location) %>%
+  dunn_test(observed ~ group, p.adjust.method = "BH") 
+
+pwc_richness_Day_V2_location  <- pwc_richness_Day_V2_location %>% add_xy_position(x = "group")
+pwc_richness_Day_V2_location
+
+res.kruskal_Shannon_Day_V2_location <- alphaDiversityList$V2 %>% group_by(location) %>% kruskal_test(diversity_shannon ~ group)
+res.kruskal_Shannon_Day_V2_location
+
+pwc_Shannon_Day_V2_location <- alphaDiversityList$V2 %>% group_by(location) %>%
+  dunn_test(diversity_shannon ~ group, p.adjust.method = "BH") 
+
+pwc_Shannon_Day_V2_location <- pwc_Shannon_Day_V2_location %>% add_xy_position(x = "group")
+
+pwc_Shannon_Day_V2_location 
+
+
+# Make a boxplot of samples' richness and diversity, grouped by Site
+
+phage_richnessPlot_Day_V2_location <- ggplot(alphaDiversityList$V2 ,
+                       aes(x = group, y = observed)) +
+  #geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = group), alpha = 0.65,
+                position = position_jitter(width = 0.3)) +
+  geom_boxplot(aes(color = group), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Phage Richness") +
+  xlab(" ") +
+  #ggtitle("Richness (V2)") +
+  theme_pubr() +
+  facet_wrap(~location) +
+  #scale_x_discrete(labels=c("GROUP 1" = "Ad26/Ad26 + HD-gp140", 
+   #                         "GROUP 2" = "Ad26/Ad26 + LD-gp140",
+    #                        "GROUP 3" = "Ad26/Ad26",
+     #                       "GROUP 4" = "Ad26/MVA + HD-gp140",
+      #                      "GROUP 5" = "Ad26/MVA + LD-gp140",
+        #                    "GROUP 6" = "Ad26/MVA",
+         #                   "GROUP 7" = "Ad26/HD-gp140",
+           #                 "GROUP 8" = "Placebo")) +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  stat_pvalue_manual(pwc_richness_Day_V2_location, hide.ns = TRUE)+
+  labs(
+    #subtitle = get_test_label(res.kruskal_richness_Day_V2_location, detailed = TRUE),
+    #caption = get_pwc_label(pwc_richness_Day_V2_location)
+    )
+  
+  
+phage_diversityPlot_Day_V2_location <- ggplot(alphaDiversityList$V2,
+                        aes(x = group, y = diversity_shannon)) +
+                        geom_jitter(aes(color = group), alpha = 0.65,cposition = position_jitter(width = 0.3)) +
+                        geom_boxplot(aes(color = group), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Phage\nShannon Diversity") +
+  xlab(" ") +
+  #ggtitle("Shannon Diversity (V2)") +
+  theme_pubr() +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  theme(plot.subtitle = element_text(size = 10))  +
+  stat_pvalue_manual(pwc_Shannon_Day_V2_location, hide.ns = TRUE)+
+  labs(
+    #subtitle = get_test_label(res.kruskal_Shannon_Day_V2_location, detailed = TRUE),
+    #caption = get_pwc_label(pwc_Shannon_Day_V2_location)
+    )+
+  facet_wrap(~location)
+  #scale_x_discrete(labels=c("GROUP 1" = "Ad26/Ad26 + HD-gp140", 
+    #                        "GROUP 2" = "Ad26/Ad26 + LD-gp140",
+    #                        "GROUP 3" = "Ad26/Ad26",
+    #                        "GROUP 4" = "Ad26/MVA + HD-gp140",
+    #                        "GROUP 5" = "Ad26/MVA + LD-gp140",
+    #                        "GROUP 6" = "Ad26/MVA",
+    #                        "GROUP 7" = "Ad26/HD-gp140",
+    #                        "GROUP 8" = "Placebo")) 
+
+phage_richnessPlot_Day_V2_location
+phage_diversityPlot_Day_V2_location
+
+```
+
+
+<br>
+### **Alpha Diversity by Location & Group**--Rachel edited
+```{r plot-alpha-by-group-location-V9, fig.width=9, fig.height=8.5}
+richnessV9LocationGroup <- PlotAlphaDiversity(df = alphaDiversityList$V9,
+                                              xVar = "group",
+                                              yVar = "observed", 
+                                              yLabel = "Richness",
+                                              statMethod = "kruskal.test",
+                                              alphaPlotTitle = "Richness by Location & Group (V9)",
+                                              facetFormula = "~ location",
+                                              facetCol = 3, facetRow = 1)
+
+diversityV9LocationGroup <- PlotAlphaDiversity(df = alphaDiversityList$V9,
+                                               xVar = "group",
+                                               yVar = "diversity_shannon",
+                                               yLabel = "Shannon Diversity",
+                                               statMethod = "kruskal.test",
+                                               alphaPlotTitle = "Diversity by Location & Group (V9)",
+                                               facetFormula = "~ location",
+                                               facetCol = 3, facetRow = 1)
+
+ggarrange(plotlist = list(richnessV9LocationGroup, diversityV9LocationGroup),
+          ncol = 1, nrow = 2)
+```
+<br>
+<br>
+### alpha-diversity analysis between different groups from V9 stool samples--Yuhao edited 
+```{r alpha-diversity-group,v9,RW UG, fig.width=8, fig.height=5}
+
+res.kruskal_richness_Day_V9_location <- alphaDiversityList$V9 %>% group_by(location) %>% kruskal_test(observed ~ group)
+res.kruskal_richness_Day_V9_location
+
+pwc_richness_Day_V9_location <- alphaDiversityList$V9  %>% group_by(location) %>%
+  dunn_test(observed ~ group, p.adjust.method = "BH") 
+
+pwc_richness_Day_V9_location  <- pwc_richness_Day_V9_location %>% add_xy_position(x = "group")
+pwc_richness_Day_V9_location
+
+res.kruskal_Shannon_Day_V9_location <- alphaDiversityList$V9 %>% group_by(location) %>% kruskal_test(diversity_shannon~ group)
+res.kruskal_Shannon_Day_V9_location
+
+pwc_Shannon_Day_V9_location <- alphaDiversityList$V9 %>% group_by(location) %>%
+  dunn_test(diversity_shannon ~ group, p.adjust.method = "BH") 
+
+pwc_Shannon_Day_V9_location <- pwc_Shannon_Day_V9_location %>% add_xy_position(x = "group")
+
+pwc_Shannon_Day_V9_location 
+
+
+# Make a boxplot of samples' richness and diversity, grouped by Site
+
+phage_richnessPlot_Day_V9_location <- ggplot(alphaDiversityList$V9 ,
+                       aes(x = group, y = observed)) +
+  #geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = group), alpha = 0.65,
+                position = position_jitter(width = 0.3)) +
+  geom_boxplot(aes(color = group), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Phage Richness") +
+  xlab(" ") +
+  #ggtitle("Richness (V9)") +
+  theme_pubr() +
+  #scale_x_discrete(labels=c("GROUP 1" = "Ad26/Ad26 + HD-gp140", 
+      #                      "GROUP 2" = "Ad26/Ad26 + LD-gp140",
+       #                     "GROUP 3" = "Ad26/Ad26",
+        #                    "GROUP 4" = "Ad26/MVA + HD-gp140",
+         #                   "GROUP 5" = "Ad26/MVA + LD-gp140",
+        #                    "GROUP 6" = "Ad26/MVA",
+       #                     "GROUP 7" = "Ad26/HD-gp140",
+      #                      "GROUP 8" = "Placebo")) +
+  facet_wrap(~location) +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  stat_pvalue_manual(pwc_richness_Day_V9_location, hide.ns = TRUE)+
+  labs(
+    #subtitle = get_test_label(res.kruskal_richness_Day_V9_location, detailed = TRUE),
+    caption = get_pwc_label(pwc_richness_Day_V9_location)
+    )
+  
+  
+phage_diversityPlot_Day_V9_location <- ggplot(alphaDiversityList$V9,
+                        aes(x = group, y = diversity_shannon)) +
+                        geom_jitter(aes(color = group), alpha = 0.65,cposition = position_jitter(width = 0.3)) +
+                        geom_boxplot(aes(color = group), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Phage\nShannon Diversity") +
+  xlab(" ") +
+  #ggtitle("Shannon Diversity (V9)") +
+  theme_pubr() +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  stat_pvalue_manual(pwc_Shannon_Day_V9_location, hide.ns = TRUE)+
+  labs(
+    #subtitle = get_test_label(res.kruskal_Shannon_Day_V9_location, detailed = TRUE),
+    caption = get_pwc_label(pwc_Shannon_Day_V9_location)
+    )+
+  #scale_x_discrete(labels=c("GROUP 1" = "Ad26/Ad26 + HD-gp140", 
+      #                      "GROUP 2" = "Ad26/Ad26 + LD-gp140",
+        #                    "GROUP 3" = "Ad26/Ad26",
+         #                   "GROUP 4" = "Ad26/MVA + HD-gp140",
+          #                  "GROUP 5" = "Ad26/MVA + LD-gp140",
+         #                   "GROUP 6" = "Ad26/MVA",
+        #                    "GROUP 7" = "Ad26/HD-gp140",
+       #                     "GROUP 8" = "Placebo")) +
+  facet_wrap(~location) 
+
+phage_richnessPlot_Day_V9_location
+phage_diversityPlot_Day_V9_location
+
+```
+
+<br>
+
+
+
+
+### Combine Figure --Yuhao edited
+```{r,fig.width=8, fig.height=12}
+Fig4AB <- plot_grid(phage_richnessPlot_Day_V2_location, phage_diversityPlot_Day_V2_location, ncol = 1, labels = "AUTO", align = 'vh')
+          
+Fig4AB <- annotate_figure(Fig4AB,top = text_grob("Early Vaccination", face = "bold", size = 14))       
+Fig4AB  
+
+Fig4CD <- plot_grid(phage_richnessPlot_Day_V9_location,phage_diversityPlot_Day_V9_location, ncol = 1, labels = c("C", "D"), align = 'vh')
+Fig4CD <- annotate_figure(Fig4CD,top = text_grob("Late Vaccination", face = "bold", size = 14))       
+Fig4CD 
+
+plot_grid(Fig4AB , Fig4CD, ncol = 1,  align = 'vh')
+```
+
+### **Alpha Diversity by Location & Vaccine Group**--Rachel edited
+```{r plot-alpha-by-vaccine-group-location-V2, fig.width=9, fig.height=8.5}
+richnessV2LocationVaccine <- PlotAlphaDiversity(df = alphaDiversityList$V2,
+                                                xVar = "vaccine_group",
+                                                yVar = "observed", 
+                                                yLabel = "Richness",
+                                                statMethod = "kruskal.test",
+                                                alphaPlotTitle = "Richness by Location & Vaccine Group (V2)",
+                                                facetFormula = "~ location",
+                                                facetCol = 2, facetRow = 1)
+
+diversityV2LocationVaccine <- PlotAlphaDiversity(df = alphaDiversityList$V2,
+                                                 xVar = "vaccine_group",
+                                                 yVar = "diversity_shannon",
+                                                 yLabel = "Shannon Diversity",
+                                                 statMethod = "kruskal.test",
+                                                 alphaPlotTitle = "Diversity by Location & Vaccine Group (V2)",
+                                                 facetFormula = "~ location",
+                                                 facetCol = 2, facetRow = 1)
+
+ggarrange(plotlist = list(richnessV2LocationVaccine, diversityV2LocationVaccine),
+          ncol = 1, nrow = 2)
+```
+<br>
+
+### alpha-diversity analysis between vaccine or placebo group in V2 stool samples--Yuhao edited
+```{r alpha-diversity-group,v2, Vaccine VS placebo, fig.width=8, fig.height=5}
+# Make a boxplot of samples' richness and diversity, grouped by Site
+vaccinecolor <- c("placebo" ="#868686FF", "vaccine" = "#0073c2ff")
+
+phage_richnessPlot_Day_V2_location_Vaccine <- ggplot(alphaDiversityList$V2%>% filter(vaccine_group != "NA"),
+                       aes(x = vaccine_group, y = observed)) +
+  #geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = vaccine_group), alpha = 0.65,
+                position = position_jitter(width = 0.3)) +
+  geom_boxplot(aes(color = vaccine_group), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Phage Richness") +
+  xlab(" ") +
+  ##ggtitle("Richness (V2)") +
+  theme_pubr() +
+  scale_color_manual(values=vaccinecolor)+
+  facet_wrap(~location) +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  stat_compare_means(comparisons = list(c("placebo", "vaccine")), method = "t.test", label = "p.signif", vjust = 0, label.x = 1.5,label.y = 165) 
+  
+  
+phage_diversityPlot_Day_V2_location_Vaccine <- ggplot(alphaDiversityList$V2 %>% filter(vaccine_group != "NA"),
+                        aes(x = vaccine_group, y = diversity_shannon)) +
+                        geom_jitter(aes(color = vaccine_group), alpha = 0.65,cposition = position_jitter(width = 0.3)) +
+                        geom_boxplot(aes(color = vaccine_group), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Phage\nShannon Diversity") +
+  xlab(" ") +
+  ##ggtitle("Shannon Diversity (V2)") +
+  theme_pubr() +
+  scale_color_manual(values=vaccinecolor)+
+  facet_wrap(~location) +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  stat_compare_means(comparisons = list(c("placebo", "vaccine")), method = "t.test", label = "p.signif", vjust = 0, label.x = 1.5,label.y = 4.4)
+
+phage_alphadiversity_v2_vaccine <- plot_grid(phage_richnessPlot_Day_V2_location_Vaccine, NULL,phage_diversityPlot_Day_V2_location_Vaccine, rel_widths = c(1,0.15,1),  nrow = 1 , ncol = 3, labels = c("A","","B")) 
+
+
+
+phage_alphadiversity_v2_vaccine <- annotate_figure(phage_alphadiversity_v2_vaccine,
+               top = text_grob("Early Vaccination", face = "bold", size = 14))
+
+phage_alphadiversity_v2_vaccine
+```
+
+<br>
+### **Alpha Diversity by Location & Vaccine Group**--Rachel edited
+```{r plot-alpha-by-vaccine-group-location-V9, fig.width=9, fig.height=8.5}
+richnessV9LocationVaccine <- PlotAlphaDiversity(df = alphaDiversityList$V9,
+                                                xVar = "vaccine_group",
+                                                yVar = "observed", 
+                                                yLabel = "Richness",
+                                                statMethod = "kruskal.test",
+                                                alphaPlotTitle = "Richness by Location & Vaccine Group (V9)",
+                                                facetFormula = "~ location",
+                                                facetCol = 3, facetRow = 1)
+
+diversityV9LocationVaccine <- PlotAlphaDiversity(df = alphaDiversityList$V9,
+                                                 xVar = "vaccine_group",
+                                                 yVar = "diversity_shannon",
+                                                 yLabel = "Shannon Diversity",
+                                                 statMethod = "kruskal.test",
+                                                 alphaPlotTitle = "Diversity by Location & Vaccine Group (V9)",
+                                                 facetFormula = "~ location",
+                                                 facetCol = 3, facetRow = 1)
+
+ggarrange(plotlist = list(richnessV9LocationVaccine, diversityV9LocationVaccine),
+          ncol = 1, nrow = 2)
+```
+<br>
+<br>
+<br>
+
+### alpha-diversity analysis between vaccine or placebo group in V9 stool samples -- Yuhao edited
+```{r alpha-diversity-group,v9,Vaccine VS placebo, fig.width=16, fig.height=5}
+# Make a boxplot of samples' richness and diversity, grouped by Site
+
+phage_richnessPlot_Day_V9_location_Vaccine <- ggplot(alphaDiversityList$V9 ,
+                       aes(x = vaccine_group, y = observed)) +
+  #geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = vaccine_group), alpha = 0.65,
+                position = position_jitter(width = 0.3)) +
+  geom_boxplot(aes(color = vaccine_group), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Phage Richness") +
+  xlab(" ") +
+  #ggtitle("Richness (V9)") +
+  scale_color_manual(values=vaccinecolor)+
+  theme_pubr() +
+  facet_wrap(~location) +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  stat_compare_means(comparisons = list(c("placebo", "vaccine")), method = "t.test", label = "p.signif", vjust = 0, label.x = 1.5, label.y = 200) 
+  
+  
+phage_diversityPlot_Day_V9_location_Vaccine <- ggplot(alphaDiversityList$V9,
+                        aes(x = vaccine_group, y = diversity_shannon)) +
+                        geom_jitter(aes(color = vaccine_group), alpha = 0.65,cposition = position_jitter(width = 0.3)) +
+                        geom_boxplot(aes(color = vaccine_group), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Phage\nShannon Diversity") +
+  xlab(" ") +
+  #ggtitle("Shannon Diversity (V9)") +
+  scale_color_manual(values=vaccinecolor)+
+  theme_pubr() +
+  facet_wrap(~location) +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  stat_compare_means(comparisons = list(c("placebo", "vaccine")), method = "t.test", label = "p.signif",vjust = 0, label.x = 1.5, label.y = 5   ) 
+
+phage_alphadiversity_v9_vaccine <- ggarrange(phage_richnessPlot_Day_V9_location_Vaccine,phage_diversityPlot_Day_V9_location_Vaccine, ncol = 2, labels = c("D", "E"))
+
+phage_alphadiversity_v9_vaccine <- annotate_figure(phage_alphadiversity_v9_vaccine,
+               top = text_grob("Late Vaccination", face = "bold", size = 14))
+
+phage_alphadiversity_v9_vaccine
+```
+
+### **Beta Diversity by Location**
+
+```{r run-ADONIS-combined-locations, results='hide'}
+set.seed(67238575)
+RunAdonis(physeqSubsetList$V2, "location", "bray") # 0.002
+
+set.seed(39731037)
+RunAdonis(physeqSubsetList$V9, "location", "bray") # 0.001
+```
+Yuhao edited
+```{r ordination-combined-locations, message=FALSE}
+# V2 (ADONIS p-value = 0.002)
+set.seed(67238575)
+
+regioncolor <- c("Uganda" ="#00468BFF", "Rwanda" = "#42B540FF", "US" = "#ED0000FF")
+
+ordinationV2 <- ordinate(physeqSubsetList$V2, method = "MDS", 
+                         distance = "bray")
+
+ordPlotAllLocationsV2 <- plot_ordination(physeqSubsetList$V2, 
+                                         ordination = ordinationV2,
+                                         color = "location", shape = "location",
+                                         title = "Bray MDS (Early Vaccination)") +
+    theme_bw() + 
+    scale_color_manual(values=regioncolor)+
+    theme(plot.title = element_text(hjust = 0.5)) +
+    geom_point(size = 3) +
+    stat_ellipse(type = "norm", linetype = 2) +
+    labs(color = "Geographic Region", shape ="Geographic Region") +
+    theme(legend.position="bottom",
+        plot.title = element_text(hjust = 0.45, face = "bold"))+ 
+    annotate("text", label = "ADONIS\np = 0.002", x = 0.5, y = 0.3)
+ordPlotAllLocationsV2
+
+# V9 (ADONIS p-value = 0.002)
+set.seed(39731037)
+
+ordinationV9 <- ordinate(physeqSubsetList$V9, method = "MDS", 
+                         distance = "bray")
+
+ordPlotAllLocationsV9 <- plot_ordination(physeqSubsetList$V9, 
+                                         ordination = ordinationV9,
+                                         color = "location", shape = "location",
+                                         title = "Bray MDS (Late Vaccination)") +
+    theme_bw() +
+    scale_color_manual(values=regioncolor)+
+    theme(plot.title = element_text(hjust = 0.5)) +
+    geom_point(size = 3) +
+    stat_ellipse(type = "norm", linetype = 2) +
+    labs(color = "Geographic Region", shape ="Geographic Region") +
+    theme(legend.position="bottom",
+        plot.title = element_text(hjust = 0.45, face = "bold"))+ 
+    annotate("text", label = "ADONIS\nRW - UG p = 0.012\nRW - US p = 0.001\nUG - US p = 0.001", x = 0.65, y = 0.4)
+ordPlotAllLocationsV9
+```
+
+######Figure combine
+```{r, Fig ,fig.width=8, fig.height=9}
+
+ggarrange(phage_a_diversity_v2 ,                       
+          ordPlotAllLocationsV2,  
+          nrow = 2, heights = c(1,1), labels = c("", "C")
+          ) 
+```
+
+######Figure combine
+```{r, Fig ,fig.width=8, fig.height=9}
+
+ggarrange(phage_a_diversity_v9 ,                       
+          ordPlotAllLocationsV9,  
+          nrow = 2, heights = c(1,1), labels = c("", "C")
+          ) 
+```
+
+
+```{r pair-wise-compare-V9-bray-by-location, eval=FALSE, include=FALSE}
+# Calculate p-values for distances b/w each location
+
+# Rwanda vs. Uganda
+physeqV9RwandaUganda <- subset_samples(physeqSubsetList$V9, 
+                                       location %in% c("Rwanda", "Uganda")) %>% 
+    RemoveMissingTaxa()
+set.seed(39731037)
+adonisRwandaUganda <- RunAdonis(physeqV9RwandaUganda, "location", "bray") # 0.012
+
+# Rwanda vs. US
+physeqV9RwandaUS <- subset_samples(physeqSubsetList$V9,
+                                   location %in% c("Rwanda", "US")) %>% 
+    RemoveMissingTaxa()
+set.seed(39731037)
+adonisRwandaUS <- RunAdonis(physeqV9RwandaUS, "location", "bray") # 0.001
+
+# Uganda vs. US
+physeqV9UgandaUS <- subset_samples(physeqSubsetList$V9,
+                                   location %in% c("Uganda", "US")) %>% 
+    RemoveMissingTaxa()
+set.seed(39731037)
+adonisUgandaUS <- RunAdonis(physeqV9UgandaUS, "location", "bray") # 0.001
+```
+
+
+<br>
+<br>
+<br>
+
+
+
+
+
+### **Beta Diversity by Location & Group, and Location & Vaccine Group (V2)**
+
+```{r subset-physeqPhageV2-by-location}
+# subset physeqPhageV2 by location
+locationsV2 <- unique(sample_data(physeqPhageV2)$location)
+
+physeqPhageV2US <- physeqPhageV2 %>% 
+    subset_samples(location == "US") %>% 
+    RemoveMissingTaxa() # 364 x 32
+
+physeqPhageV2Uganda <- physeqPhageV2 %>% 
+    subset_samples(location == "Uganda") %>% 
+    RemoveMissingTaxa() # 395 x 13
+```
+
+```{r ordination-physeqPhageV2US, message=FALSE, fig.width=11, fig.height=8.5}
+# Run ADONIS on the two US locations by group and vaccine group
+set.seed(78076245)
+adonisV2USGroup <- RunAdonis(physeqPhageV2US, "group", "bray") # 0.186
+adonisV2USVaccineGroup <- RunAdonis(physeqPhageV2US, "vaccine_group", "bray") # 0.9
+
+set.seed(78076245)
+
+ordinationV2US <- ordinate(physeqPhageV2US, method = "MDS", distance = "bray")
+
+# color by group
+ordPlotV2USGroup <- plot_ordination(physeqPhageV2US,
+                                    ordination = ordinationV2US,
+                                    color = "group",
+                                    title = "Bray MDS US (V2), colored by Group") +
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    geom_point(size = 3) +
+    stat_ellipse(type = "norm") +
+    annotate("text", label = "ADONIS p-value = 0.186", x = -0.75, y = 0.475)
+
+# color by vaccine_group
+ordPlotV2USVaccineGroup <- plot_ordination(physeqPhageV2US,
+                                           ordination = ordinationV2US,
+                                           color = "vaccine_group",
+                                           title = "US") +
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    labs(color = "Vaccine Group") +
+    scale_color_manual(values=vaccinecolor)+
+    geom_point(size = 3) +
+    #stat_ellipse(type = "norm") +
+    geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+    geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+    annotate("text", label = "ADONIS\np = 0.9", x = 0.2, y = -0.3)+
+    theme(legend.position="bottom",
+        plot.title = element_text(hjust = 0.45, face = "bold")) 
+
+ggarrange(plotlist = list(ordPlotV2USGroup, ordPlotV2USVaccineGroup),
+          ncol = 2, nrow = 1, common.legend = TRUE)
+```
+<br>
+
+---
+
+<br>
+```{r ordination-physeqPhageV2Uganda, message=FALSE, fig.width=11, fig.height=8.5}
+# Run ADONIS on the two Uganda locations by group and vaccine group
+set.seed(59298239)
+adonisV2UgandaGroup <- RunAdonis(physeqPhageV2Uganda, "group", "bray") # 0.45
+adonisV2UgandaVaccineGroup <- RunAdonis(physeqPhageV2Uganda, "vaccine_group", "bray") # 0.541
+
+set.seed(59298239)
+
+ordinationV2Uganda <- ordinate(physeqPhageV2Uganda, method = "MDS", 
+                               distance = "bray")
+
+# color by group
+ordPlotV2UgandaGroup <- plot_ordination(physeqPhageV2Uganda,
+                                    ordination = ordinationV2Uganda,
+                                    color = "group",
+                                    title = "Bray MDS Uganda (V2), colored by Group") +
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    geom_point(size = 3) +
+    stat_ellipse(type = "norm", linetype = 2) +
+    geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+    geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+    annotate("text", label = "ADONIS p-value = 0.45", x = -0.1, y = 0.2)
+
+# color by vaccine_group
+ordPlotV2UgandaVaccineGroup <- plot_ordination(physeqPhageV2Uganda,
+                                           ordination = ordinationV2Uganda,
+                                           color = "vaccine_group",
+                                           title = "UG") +
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    scale_color_manual(values=vaccinecolor)+
+    geom_point(size = 3) +
+    #stat_ellipse(type = "norm") +
+    geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+    geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+    annotate("text", label = " ", x = 0.375, y = -0.25)+
+    theme(legend.position="none",
+        plot.title = element_text(hjust = 0.5, face = "bold")) 
+
+ggarrange(plotlist = list(ordPlotV2UgandaGroup, ordPlotV2UgandaVaccineGroup),
+          ncol = 2, nrow = 1, common.legend = TRUE)
+```
+Yuhao edited
+```{r}
+#Bray MDS ordination-plots, Samples by vaccine or placebo group in V2
+ordPlotV2USVaccineGroupA <- ordPlotV2USVaccineGroup + theme(legend.position="none")
+legend <- get_legend(ordPlotV2USVaccineGroup)
+
+vaccine.MDS.V2 <- ggarrange(ordPlotV2UgandaVaccineGroup, ordPlotV2USVaccineGroupA,ncol = 2,align = c("v"), labels = c("C", ""))
+
+phage_b_diversity_vaccine.v2 <- plot_grid(vaccine.MDS.V2, legend,  rel_heights = c(1,.1), ncol = 1)
+
+phage_b_diversity_vaccine.v2
+```
+
+##Figure combine
+```{r, Fig ,fig.width=8, fig.height=9}
+
+ggarrange(phage_alphadiversity_v2_vaccine,                          # First row with scatter plot
+          phage_b_diversity_vaccine.v2, # Second row with box and dot plots
+          nrow = 2, heights = c(1,1)
+          ) 
+```
+
+
+
+
+
+### **Beta Diversity by Location & Group, and Location & Vaccine Group (V9)**
+
+```{r subset-physeqPhageV9-by-location}
+# subset physeqPhageV9 by location
+locationsV9 <- unique(sample_data(physeqPhageV9)$location)
+
+physeqPhageV9US <- physeqPhageV9 %>% 
+    subset_samples(location == "US") %>% 
+    RemoveMissingTaxa() # 364 x 34
+
+physeqPhageV9Uganda <- physeqPhageV9 %>% 
+    subset_samples(location == "Uganda") %>% 
+    RemoveMissingTaxa() # 469 x 16
+
+physeqPhageV9Rwanda <- physeqPhageV9 %>% 
+    subset_samples(location == "Rwanda") %>% 
+    RemoveMissingTaxa() # 491 x 52
+```
+
+```{r ordination-physeqPhageV9US, message=FALSE, fig.width=11, fig.height=8.5}
+# Run ADONIS on the two US location by group and vaccine group
+set.seed(14210837)
+adonisV9USGroup <- RunAdonis(physeqPhageV9US, "group", "bray") # 0.044
+adonisV9USVaccineGroup <- RunAdonis(physeqPhageV9US, "vaccine_group", "bray") # 0.888
+
+set.seed(14210837)
+
+ordinationV9US <- ordinate(physeqPhageV9US, method = "MDS", distance = "bray")
+
+# color by group
+ordPlotV9USGroup <- plot_ordination(physeqPhageV9US,
+                                    ordination = ordinationV9US,
+                                    color = "group",
+                                    title = "Bray MDS US (V9), colored by Group") +
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    geom_point(size = 3) +
+    stat_ellipse(type = "norm") +
+    annotate("text", label = "ADONIS p-value = 0.044", x = -1, y = 0.75)
+
+# color by vaccine_group
+ordPlotV9USVaccineGroup <- plot_ordination(physeqPhageV9US,
+                                           ordination = ordinationV9US,
+                                           color = "vaccine_group",
+                                           title = "US") +
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    labs(color = "Vaccine Group") +
+    scale_color_manual(values=vaccinecolor)+
+    geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+    geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+    geom_point(size = 3) +
+    stat_ellipse(type = "norm", linetype = 2) +
+    annotate("text", label = "ADONIS\np = 0.888", x = 0.5, y = -0.75)+
+    theme(legend.position="bottom",
+        plot.title = element_text(hjust = 0.5, face = "bold")) 
+
+ggarrange(plotlist = list(ordPlotV9USGroup, ordPlotV9USVaccineGroup),
+          ncol = 2, nrow = 1, common.legend = TRUE)
+```
+<br>
+
+---
+
+<br>
+```{r ordination-physeqPhageV9Uganda, message=FALSE, fig.width=11, fig.height=8.5}
+# Run ADONIS on the two Uganda location by group and vaccine group
+set.seed(97406601)
+adonisV9UgandaGroup <- RunAdonis(physeqPhageV9Uganda, "group", "bray") # 0.65
+adonisV9UgandaVaccineGroup <- RunAdonis(physeqPhageV9Uganda, "vaccine_group", "bray") # 0.24
+
+set.seed(97406601)
+
+ordinationV9Uganda <- ordinate(physeqPhageV9Uganda, method = "MDS", 
+                               distance = "bray")
+
+# color by group
+ordPlotV9UgandaGroup <- plot_ordination(physeqPhageV9Uganda,
+                                    ordination = ordinationV9Uganda,
+                                    color = "group",
+                                    title = "Bray MDS Uganda (V9), colored by Group") +
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    geom_point(size = 3) +
+    stat_ellipse(type = "norm") +
+    annotate("text", label = "ADONIS p-value = 0.65", x = -0.75, y = 1)
+
+# color by vaccine_group
+ordPlotV9UgandaVaccineGroup <- plot_ordination(physeqPhageV9Uganda,
+                                           ordination = ordinationV9Uganda,
+                                           color = "vaccine_group",
+                                           title = "UG") +
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    scale_color_manual(values=vaccinecolor)+
+    geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+    geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+    geom_point(size = 3) +
+    #stat_ellipse(type = "norm") +
+    annotate("text", label = " ", x = 0.6, y = 0.4)+
+    theme(legend.position="none",
+        plot.title = element_text(hjust = 0.5, face = "bold")) 
+
+ggarrange(plotlist = list(ordPlotV9UgandaGroup, ordPlotV9UgandaVaccineGroup),
+          ncol = 2, nrow = 1, common.legend = TRUE)
+```
+<br>
+
+---
+
+<br>
+```{r ordination-physeqPhageV9Rwanda, message=FALSE, fig.width=11, fig.height=8.5}
+# Run ADONIS on the two Rwanda locations by group and vaccine group
+set.seed(38333792)
+adonisV9RwandaGroup <- RunAdonis(physeqPhageV9Rwanda, "group", "bray") # 0.527
+adonisV9RwandaVaccineGroup <- RunAdonis(physeqPhageV9Rwanda, "vaccine_group", 
+                                        "bray") # 0.416
+
+set.seed(38333792)
+
+ordinationV9Rwanda <- ordinate(physeqPhageV9Rwanda, method = "MDS", 
+                               distance = "bray")
+
+# color by group
+ordPlotV9RwandaGroup <- plot_ordination(physeqPhageV9Rwanda,
+                                        ordination = ordinationV9Rwanda,
+                                        color = "group",
+                                        title = "Bray MDS Rwanda (V9), colored by Group") +
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    geom_point(size = 3) +
+    stat_ellipse(type = "norm") +
+    annotate("text", label = "ADONIS p-value = 0.527", x = -0.75, y = 0.6)
+
+# color by vaccine_group
+ordPlotV9RwandaVaccineGroup <- plot_ordination(physeqPhageV9Rwanda,
+                                               ordination = ordinationV9Rwanda,
+                                               color = "vaccine_group",
+                                               title = "RW") +
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    scale_color_manual(values=vaccinecolor)+
+    geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+    geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+    geom_point(size = 3) +
+    stat_ellipse(type = "norm", linetype = 2) +
+    annotate("text", label = "ADONIS\np = 0.416", x = 0.4, y = -0.5)+
+  theme(legend.position="none",
+        plot.title = element_text(hjust = 0.5, face = "bold"))
+
+ggarrange(plotlist = list(ordPlotV9RwandaGroup, ordPlotV9RwandaVaccineGroup),
+          ncol = 2, nrow = 1, common.legend = TRUE)
+```
+<br>
+<br>
+<br>
+Yuhao edited
+```{r}
+#Bray MDS ordination-plots, Samples by vaccine or placebo group in V9
+ordPlotV9USVaccineGroupA <- ordPlotV9USVaccineGroup + theme(legend.position="none")
+legend <- get_legend(ordPlotV9USVaccineGroup)
+
+vaccine.MDS.V9 <- ggarrange(ordPlotV9RwandaVaccineGroup, ordPlotV9UgandaVaccineGroup, ordPlotV9USVaccineGroupA,ncol = 3,align = c("v"), labels = c("F", ""))
+
+phage_b_diversity_vaccine.v9 <- plot_grid(vaccine.MDS.V9, legend,  rel_heights = c(1,.1), ncol = 1)
+
+phage_b_diversity_vaccine.v9
+```
+##Figure combine
+```{r, Fig ,fig.width=8, fig.height=9}
+
+ggarrange(phage_alphadiversity_v9_vaccine,                          # First row with scatter plot
+          phage_b_diversity_vaccine.v9, # Second row with box and dot plots
+          nrow = 2, heights = c(1,1)
+          ) 
+```
+
+### Combine Figure 3 PHGAE
+
+```{r,  fig.width=16, fig.height=9}
+FIG3ABDE <- plot_grid(phage_alphadiversity_v2_vaccine, NULL,phage_alphadiversity_v9_vaccine, rel_widths = c(1,0.14,1.5), nrow = 1 , ncol = 3)
+
+FIG3CF <- plot_grid(phage_b_diversity_vaccine.v2,NULL, phage_b_diversity_vaccine.v9, rel_widths = c(1,0.05,1.35),  nrow = 1 , ncol = 3)
+
+
+          
+plot_grid(FIG3ABDE, FIG3CF, ncol = 1, rel_heights =  c(0.9,1))
+
+```
+
+---
+title: "hiv_vaccine_figures"
+author: "Rachel Rodgers"
+date: "6/4/2021"
+output: html_document
+---
+
+```{r load-packages}
+library("phyloseq")
+library("microbiome")
+library("ggpubr")
+library("ggsci")
+library("tidyverse")
+library("vegan")
+source("./shared_R_scripts/Helper_Functions.R")
+theme_set(theme_bw(base_size = 12))
+```
+
+```{r load-physeq-data}
+physeqPhage <- readRDS("./data/RData_Objects/physeqPhage.RDS")
+physeqPhage # 685 x 147
+```
+
+```{r add-variables-to-sample-data}
+sampleData <- as(sample_data(physeqPhage), "data.frame")
+
+"patient_complete" %in% colnames(sampleData) # FALSE
+"sub_region" %in% colnames(sampleData) # FALSE
+
+# The patient_complete column is missing, pull in from the 16S metadata file
+#   "hiv_vaccine_microbiome_response_calls.txt
+bacterialMetadata <- read.delim("./data/hiv_vaccine_microbiome_response_calls.txt",
+                                check.names = FALSE, sep = "\t",
+                                stringsAsFactors = FALSE)
+
+subRegionLUT <- bacterialMetadata %>% 
+  select(SampleID, sub_region) %>% 
+  deframe()
+
+sampleData$SampleID <- as.character(sampleData$SampleID)
+
+sampleDataModified <- sampleData %>% 
+  mutate(sub_region = subRegionLUT[SampleID])
+
+# Add back to the phyloseq object
+sample_data(physeqPhage) <- sample_data(sampleDataModified)
+```
+
+```{r remove-samples}
+# Remove samples with ND for region or are in group 8
+physeqFilteredSamples <- physeqPhage %>% 
+  subset_samples(region != "ND" & group != "GROUP 8") %>% 
+  prune_taxa(taxa_sums(.) > 0, .)
+physeqFilteredSamples # 682 x 32
+
+# Add a patient_complete column, which I believe should be a 1 if the patient
+#   appears in the data set more than once (is paired).  Going to use the
+#   patient_id column to determine which samples are duplicated.
+sampleDataFilteredSamples <- as(sample_data(physeqFilteredSamples), "data.frame")
+duplicatedPatientIDs <- sampleDataFilteredSamples$patient_id[duplicated(sampleDataFilteredSamples$patient_id)] # 34
+
+sampleDataFilteredSamples <- sampleDataFilteredSamples %>% 
+  mutate(patient_complete_virome = ifelse(patient_id %in% duplicatedPatientIDs, yes = 1, no = 0))
+
+sample_data(physeqFilteredSamples) <- sample_data(sampleDataFilteredSamples)
+physeqCompleteSamples <- physeqFilteredSamples %>% 
+  subset_samples(patient_complete_virome == 1) %>% 
+  prune_taxa(taxa_sums(.) > 0, .)
+physeqCompleteSamples # 561 x 68
+```
+
+Panels A & B - Alpha Diversity
+
+```{r}
+diversity <-  microbiome::alpha(physeqCompleteSamples, 
+                   index = c("observed", "diversity_shannon"))
+diversity <- rownames_to_column(diversity, var = "sample_name")
+sampleDataCompleteSamples <- as(sample_data(physeqCompleteSamples), "data.frame")
+sampleDataCompleteSamples <- merge(diversity, sampleDataCompleteSamples,
+                                   by = "sample_name")
+sampleDataCompleteSamples <- sampleDataCompleteSamples %>% 
+  group_by(visit_description) %>% 
+  mutate(group2 = 1:n()) %>% 
+  rename(Observed = observed,
+         Shannon = diversity_shannon)
+test <- select(sampleDataCompleteSamples, patient_id, patient_complete_virome,
+               group2, visit_description)
+matchcolor <- c("V2 STOOL COLLECTION" ="#00A087B2", 
+                "V9 STOOL COLLECTION" = "#F39B7FB2")
+PlotAlphaDiversity <- function(df, alphaIdx, yLabel, statYCoord) {
+  
+  alphaPlot <- ggpaired(data = df,
+                        x = "visit_description", 
+                        y = alphaIdx,
+                        id = "patient_id", 
+                        color = "visit_description",
+                        point.size = 1.6, 
+                        line.color = "gray", 
+                        line.size = 0.4,
+                        palette = "jco",
+                        facet.by = "sub_region") +
+  stat_compare_means(comparisons = list(c("V2 STOOL COLLECTION", 
+                                          "V9 STOOL COLLECTION")), 
+                     label = "p.signif", paired = TRUE, label.y = statYCoord) +
+  ylab(yLabel) +
+  xlab(" ") +
+  scale_color_manual(values = matchcolor) +
+  scale_x_discrete(labels=c("V2 STOOL COLLECTION" = "Early", 
+                            "V9 STOOL COLLECTION" = "Late")) +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")
+}
+alphaPlotList <- pmap(.l = list(alphaIdx = list(richness = "Observed",
+                                                diversity = "Shannon"),
+                                yLabel = list(richness = "Bacterial Richness",
+                                              diversity = "Bacterial Shannon Diversity"),
+                                statYCoord = list(richness = 250,
+                                                  diversity = 4.8)),
+                      .f = PlotAlphaDiversity,
+                      df = sampleDataCompleteSamples)
+alphaDiversityPlot <- ggarrange(alphaPlotList$richness, alphaPlotList$diversity, 
+                                ncol = 2, labels = c("A", "B"))
+alphaDiversityPlot
+```
+
+
+Panel C - Bray Distances
+
+```{r mds-bray-plots}
+#----- subset-physeq-by-sub-region -----#
+physeqUG <- physeqFilteredTaxa %>% 
+  subset_samples(sub_region == "UG") %>% 
+  prune_taxa(taxa_sums(.) > 0, .)
+physeqUG # 434 x 22
+physeqUS <- physeqFilteredTaxa %>% 
+  subset_samples(sub_region == "US") %>% 
+  prune_taxa(taxa_sums(.) > 0, .)
+physeqUS # 353 x 50
+#----- calculate ordinations -----#
+set.seed(17810968)
+ordUG <- ordinate(physeqUG, method = "PCoA", distance = "bray")
+ordUS <- ordinate(physeqUS, method = "PCoA", distance = "bray")
+#----- calculate ADONIS p-values -----E
+RunAdonis <- function(physeqObj, category, distance) {
+  
+  bdist <- phyloseq::distance(physeqObj, distance)
+  col <- as(sample_data(physeqObj), "data.frame")[, category]
+  
+  # Adonis test
+  adonis.bdist <- adonis(bdist ~ col)
+  return(adonis.bdist)
+  
+}
+set.seed(17810968)
+adonisUG <- RunAdonis(physeqUG, "visit_description", "bray") # p = 0.72
+adonisUS <- RunAdonis(physeqUS, "visit_description", "bray") # p = 0.989
+#----- plot ordinations -----#
+PlotOrdinations <- function(physeqObj, ordObj, ordTitle, ordSubTitle, adonisP) {
+  
+  annotationP <- paste("ADONIS\n p =", adonisP, sep = " ")
+  
+  ordPlot <- plot_ordination(physeqObj, 
+                             ordObj, 
+                             color = "visit_description", 
+                             axes = c(1, 2)) + 
+  scale_color_jco()+
+  geom_point(size = 2) +
+  labs(title = ordTitle,
+       subtitle = ordSubTitle, 
+       color = "Visit description") +
+  stat_ellipse(type = "norm", linetype = 2) +
+  scale_color_manual(labels=c("V2 STOOL COLLECTION" = "Early Vaccination", 
+                            "V9 STOOL COLLECTION" = "Late Vaccination"), values = matchcolor)+
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="none",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold"))+
+  annotate("text", x=0.45, y=-0.25, label = annotationP, col = "black")
+  
+}
+brayPlotList <- pmap(.l = list(physeqObj = list(UG = physeqUG, 
+                                                US = physeqUS),
+                               ordObj = list(UG = ordUG,
+                                             US = ordUS),
+                               ordTitle = list(UG = "Bray distances",
+                                               US = ""),
+                               ordSubTitle = list(UG = "UG", 
+                                                  US = "US"),
+                               adonisP = list(UG = "0.72", 
+                                              US = "0.99")),
+                     .f = PlotOrdinations)
+ordinationPlots <- ggarrange(brayPlotList$UG, brayPlotList$US,
+                             ncol = 2, common.legend = TRUE, legend = "bottom",
+                             labels = c("C", ""))
+ordinationPlots
+```
+
+Combined panel
+
+```{r combine-panels, fig.width=8, fig.height=10}
+ggarrange(alphaDiversityPlot,
+          ordinationPlots,
+          nrow = 2, heights = c(1, 1))
+```
+
+Session Info
+
+```{r sessionInfo}
+writeLines(capture.output(sessionInfo()), "hiv_vaccine_viral_figures_sessionInfo.txt")
+```
