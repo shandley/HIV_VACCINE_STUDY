@@ -1,0 +1,2400 @@
+---
+title: "16 S figures all"
+author: "Scott A. Handley, Yuhao Li"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+**Project Description:**
+Analysis of the bacterial microbiome of patients enrolled in Dan Barouch's HIV vaccine study. Two cohorts are analyzed, one from the US and one from Africa. Analysis is of 16S rRNA sequences obtained from patient stool samples.
+
+**Collaborators:**
+Dan Barouch: dbarouch@bidmc.harvard.edu
+Megan Baldridge: mbaldridge@wustl.edu
+Scott Handley: shandley@wustl.edu
+Yuhao Li: yuhaoli@wustl.edu
+
+**Other relevant documents:**
+The following Phyloseq objects are available. Each is distinguished based on the 16S reference database used for taxonomic classification. RDP and Silva were processed through the species assignment workflow available through dada2 (https://benjjneb.github.io/dada2/assign.html:
+
+  * ps0.HIV_vaccine.gg.RDS (GreenGenes)
+  * ps0.HIV_vaccine.rdp.RDS (RDP)
+  * ps0.HIV_vaccine.silva.RDS (Silva)
+
+  * mapping file: hiv_vaccine_microbiome_response_calls.txt
+
+**Technical References:**
+  * http://f1000research.com/articles/5-1492/v1
+
+  * http://benjjneb.github.io/dada2/tutorial.htm
+
+**Workflow details:** The R commands below represent a full analysis of the following:
+
+*** UPDATE THIS PRIOR TO PUBLICATION TO REFLECT FINAL WORKFLOW ***
+1) Sample quality control
+2) ASV properties
+3) Community Composition
+4) Alpha diversity
+5) Beta diversity
+6) Differential abundance testing
+
+```{r initiate-environment}
+# Global knitr option
+knitr::opts_chunk$set(fig.width=8,
+                      fig.height=6,
+                      fig.path="./figures/",
+                      dev='png',
+                      warning=FALSE,
+                      message=FALSE)
+
+# Load libraries
+library("tidyverse"); packageVersion("tidyverse")
+library("phyloseq"); packageVersion("phyloseq")
+library("reshape2"); packageVersion("reshape2")
+library("plyr"); packageVersion("plyr")
+library("RColorBrewer"); packageVersion("RColorBrewer")
+library("vegan"); packageVersion("vegan")
+library("knitr"); packageVersion("knitr")
+library("plotly"); packageVersion("plotly")
+library("ggpubr"); packageVersion("ggpubr")
+library("data.table"); packageVersion("data.table")
+library("microbiome"); packageVersion("microbiome")
+library("DESeq2"); packageVersion("DESeq2")
+library("ggrepel"); packageVersion("ggrepel")
+library("janitor"); packageVersion("janitor")
+library("DAtest"); packageVersion("DAtest")
+library("rstatix"); packageVersion("rstatix")
+library("broom"); packageVersion("broom")
+library("ggsci"); packageVersion("ggsci")
+library("ggplot2"); packageVersion("ggplot2")
+library("gridExtra"); packageVersion("gridExtra")
+library("tidylog"); packageVersion("tidylog")
+library("cowplot"); packageVersion("cowplot")
+library("gridtext"); packageVersion("gridtext")
+library("circlize"); packageVersion("circlize")
+library("ComplexHeatmap"); packageVersion("ComplexHeatmap")
+library("dendextend"); packageVersion("dendextend")
+library("dplyr"); packageVersion("dplyr") # data reformatting
+library("tidyr"); packageVersion("tidyr") # data reformatting
+library("stringr"); packageVersion("stringr") # string manipulation
+
+####
+library("ggplotify"); packageVersion("ggplotify")
+library("cowplot"); packageVersion("cowplot")
+library("grid"); packageVersion("grid")
+library("ggsci"); packageVersion("ggsci")
+
+
+# Set global theming ggplot settings
+theme_set(theme_bw(base_size = 12))
+
+# Set a random seed so that exact results can be reproduced
+set.seed(1000)
+
+```
+
+##Read in data
+
+```{r initiate-data}
+# Load Phyloseq Object generated in *_preprocessing.Rmd documents
+ps0 <- readRDS("./data/ps0.HIV_vaccine.rdp.RDS")
+ps0
+
+# Load mapping file
+map <- import_qiime_sample_data("./data/hiv_vaccine_microbiome_response_calls.txt")
+
+# Merge updated mapping files
+ps0 <- merge_phyloseq(ps0, map)
+ps0
+
+# Refactor variables to factors
+# Had trouble getting this to work with lapply on a PS object. I am sure there is a better way
+sample_data(ps0)$esa_cla_call <- as_factor(sample_data(ps0)$esa_cla_call)
+sample_data(ps0)$esa_coc_call <- as_factor(sample_data(ps0)$esa_coc_call)
+sample_data(ps0)$esa_clc_call <- as_factor(sample_data(ps0)$esa_clc_call)
+sample_data(ps0)$esa_clb_call <- as_factor(sample_data(ps0)$esa_clb_call)
+sample_data(ps0)$esa_mos1_call <- as_factor(sample_data(ps0)$esa_mos1_call)
+sample_data(ps0)$adcp_cla_call <- as_factor(sample_data(ps0)$adcp_cla_call)
+sample_data(ps0)$adcp_clb_call <- as_factor(sample_data(ps0)$adcp_clb_call)
+sample_data(ps0)$adcp_coc_call <- as_factor(sample_data(ps0)$adcp_coc_call)
+sample_data(ps0)$adcp_clc_call <- as_factor(sample_data(ps0)$adcp_clc_call)
+sample_data(ps0)$adcp_mos1_call <- as_factor(sample_data(ps0)$adcp_mos1_call)
+sample_data(ps0)$pot_em1_call <- as_factor(sample_data(ps0)$pot_em1_call)
+sample_data(ps0)$pot_em2_call <- as_factor(sample_data(ps0)$pot_em2_call)
+sample_data(ps0)$pot_e1p_call <- as_factor(sample_data(ps0)$pot_e1p_call)
+sample_data(ps0)$pot_e2p_call <- as_factor(sample_data(ps0)$pot_e2p_call)
+sample_data(ps0)$pot_e3p_call <- as_factor(sample_data(ps0)$pot_e3p_call)
+sample_data(ps0)$pot_gp_call <- as_factor(sample_data(ps0)$pot_gp_call)
+sample_data(ps0)$pot_gm1_call <- as_factor(sample_data(ps0)$pot_gm1_call)
+sample_data(ps0)$pot_gm2_call <- as_factor(sample_data(ps0)$pot_gm2_call)
+sample_data(ps0)$pot_pp_call <- as_factor(sample_data(ps0)$pot_pp_call)
+sample_data(ps0)$pot_pm1_call <- as_factor(sample_data(ps0)$pot_pm1_call)
+sample_data(ps0)$pot_pm2_call <- as_factor(sample_data(ps0)$pot_pm2_call)
+sample_data(ps0)$region <- as.factor(sample_data(ps0)$region)
+sample_data(ps0)$sub_region <- as.factor(sample_data(ps0)$sub_region)
+sample_data(ps0)$visit_description_provided <- as.factor(sample_data(ps0)$visit_description_provided)
+
+# View sample variables & generate basic stats
+sample_variables(ps0)
+sd(sample_sums(ps0))
+get_taxa_unique(ps0, "Phylum")
+ntaxa(ps0)
+
+# Remove sample with ND
+ps0 <- subset_samples(ps0, region !="ND")
+levels(sample_data(ps0)$region)
+
+## subset samples according to Time
+# V2 STOOL COLLECTION fecal samples
+physeqMerged_Day_V2<-subset_samples(ps0, visit_description == "V2 STOOL COLLECTION")
+physeqMerged_Day_V2
+# V9 STOOL COLLECTION fecal samples
+physeqMerged_Day_V9<-subset_samples(ps0, visit_description == "V9 STOOL COLLECTION")
+physeqMerged_Day_V9
+# Mactched fecal samples in V2 and V9
+physeqMerged_M<-subset_samples(ps0, patient_complete == "1")
+ physeqMerged_M<-subset_samples(physeqMerged_M, group != "GROUP 8")
+physeqMerged_M
+```
+
+## Removing sequences
+
+```{r prevalence-assessment}
+
+# Begin by removing sequences that were classified as either mitochondria or chlorplast
+ps0 # Check the number of taxa prior to removal
+ps1 <- ps0 %>%
+  subset_taxa(
+    Family  != "mitochondria" &
+    Class   != "Chloroplast" &
+    Phylum != "Cyanobacteria/Chloroplast"
+  )
+ps1 # Confirm that the taxa were removed
+
+physeqMerged_Day_V2 # Check the number of taxa prior to removal
+ps1_V2 <- physeqMerged_Day_V2 %>%
+  subset_taxa(
+    Family  != "mitochondria" &
+    Class   != "Chloroplast" &
+    Phylum != "Cyanobacteria/Chloroplast"
+  )
+ps1_V2 # Confirm that the taxa were removed
+
+physeqMerged_Day_V9 # Check the number of taxa prior to removal
+ps1_V9 <- physeqMerged_Day_V9 %>%
+  subset_taxa(
+    Family  != "mitochondria" &
+    Class   != "Chloroplast" &
+    Phylum != "Cyanobacteria/Chloroplast"
+  )
+ps1_V9  # Confirm that the taxa were removed
+
+physeqMerged_M # Check the number of taxa prior to removal
+ps1_M <- physeqMerged_M %>%
+  subset_taxa(
+    Family  != "mitochondria" &
+    Class   != "Chloroplast" &
+    Phylum != "Cyanobacteria/Chloroplast"
+  )
+ps1_M  # Confirm that the taxa were removed
+
+```
+
+## Heatmap of immune responses
+```{r, Data preparation}
+map <- import_qiime_sample_data("./data/hiv_vaccine_microbiome_response_calls.txt")
+head(map)
+str(map)
+
+#visit2 samples group by geography regions
+df_v2 <- map %>% subset_samples(visit_description == "V2 STOOL COLLECTION") %>% subset_samples(group != "ND")  %>% group_by(group, sub_region)%>% arrange(group) %>% arrange(sub_region) %>% remove_rownames %>% column_to_rownames(var="patient_id") %>% droplevels()
+
+#visit9 samples group by geography regions
+df_v9 <- map %>% subset_samples(visit_description == "V9 STOOL COLLECTION") %>% subset_samples(group != "ND")  %>% group_by(group, sub_region)%>% arrange(group) %>% arrange(sub_region) %>% remove_rownames %>% column_to_rownames(var="patient_id") %>% droplevels()
+
+#reomve all NA samples and convert row to column
+df_v2 <- df_v2[-8,]
+df_v2.t <- t(df_v2)
+
+df_v9.t <- t(df_v9)
+
+#
+mat.v2 = as.matrix(df_v2.t[grep("call", colnames(df_v2)),])
+mat.v9 = as.matrix(df_v9.t[grep("call", colnames(df_v9)),])
+
+### Returns string without leading white space
+trim.leading <- function (x)  sub("^\\s+", "", x)
+mat.v2 <- trim.leading(mat.v2)
+mat.v9 <- trim.leading(mat.v9)
+```
+
+```{r, Subset the date for annotation}
+##Set up V2 and V9 annotation file and colours
+ann.v2 <- data.frame(df_v2.t["sub_region",], df_v2$vaccination_regimens )
+
+colnames(ann.v2) = c("sub_region", "group")
+
+colours.v2 <- list("sub_region" = c("UG" ="#00468BFF", "RW" = "#42B540FF", "US" = "#ED0000FF"),
+                   "group" = c("Ad26/Ad26 plus high-dose gp140" = "#8DD3C7", 
+                               "Ad26/Ad26 plus low-dose gp140" = "#FFFFB3", 
+                               "Ad26/Ad26" = "#BEBADA", 
+                               "Ad26/MVA plus high-dose gp140" = "#FB8072", 
+                               "Ad26/MVA plus low-dose gp140" = "#80B1D3", 
+                               "Ad26/MVA" = "#FDB462", 
+                               "Ad26/high-dose gp140" = "#B3DE69", 
+                               "Placebo" = "#FCCDE5" ))
+
+ann.v9 <- data.frame(df_v9.t["sub_region",], df_v9$vaccination_regimens )
+
+colnames(ann.v9) = c("sub_region", "group")
+
+colours.v9 <- list("sub_region" = c("UG" ="#00468BFF", "RW" = "#42B540FF", "US" = "#ED0000FF"),
+                   "group" = c("Ad26/Ad26 plus high-dose gp140" = "#8DD3C7", 
+                               "Ad26/Ad26 plus low-dose gp140" = "#FFFFB3", 
+                               "Ad26/Ad26" = "#BEBADA", 
+                               "Ad26/MVA plus high-dose gp140" = "#FB8072", 
+                               "Ad26/MVA plus low-dose gp140" = "#80B1D3", 
+                               "Ad26/MVA" = "#FDB462", 
+                               "Ad26/high-dose gp140" = "#B3DE69", 
+                               "Placebo" = "#FCCDE5" ))
+
+##Set up the colours in heatmap
+library(RColorBrewer)
+col_fun =  c("1"= "#377EB8", "0" ="#E41A1C")
+```
+
+
+```{r, heatmap annotation}
+
+## heatmap overall setting
+ht_opt(
+    legend_title_gp = gpar(fontsize = 8, fontface = "bold"), 
+    legend_labels_gp = gpar(fontsize = 8), 
+    heatmap_column_names_gp = gpar(fontsize = 8),
+    heatmap_column_title_gp = gpar(fontsize = 10),
+    heatmap_row_title_gp = gpar(fontsize = 8)
+)
+
+##heatmap annotation
+ha.v2 = HeatmapAnnotation(df = ann.v2,
+                          which = 'col',
+                          col = colours.v2,
+                          annotation_width = unit(c(1, 4), 'cm'), 
+                          annotation_name_side = "left", annotation_label = c("Geographic Region","Vaccine Groups"),
+                          show_annotation_name = c(sub_region = FALSE, group = FALSE),
+                          gap = unit(1, 'mm'),
+                          show_legend = FALSE)
+
+ha.v9 = HeatmapAnnotation(df = ann.v9,
+                          which = 'col',
+                          col = colours.v9,
+                          annotation_width = unit(c(1, 4), 'cm'), 
+                          annotation_name_side = "right", annotation_label = c("Geographic Region","Vaccine Groups"),
+                          show_annotation_name = c(sub_region = FALSE, group = FALSE),
+                          gap = unit(1, 'mm'),
+                          show_legend = c("Geographic Region" = FALSE, "Vaccine Groups" =TRUE),
+                          annotation_legend_param = list(
+                            at = c("Ad26/Ad26 plus high-dose gp140", 
+                                   "Ad26/Ad26 plus low-dose gp140" , 
+                                   "Ad26/Ad26", 
+                                   "Ad26/MVA plus high-dose gp140", 
+                                   "Ad26/MVA plus low-dose gp140",
+                                   "Ad26/MVA",
+                                   "Ad26/high-dose gp140",
+                                   "Placebo"), 
+                            labels = c("Ad26/Ad26 plus high-dose gp140", "Ad26/Ad26 plus low-dose gp140" , "Ad26/Ad26", "Ad26/MVA plus high-dose gp140", "Ad26/MVA plus low-dose gp140","Ad26/MVA", "Ad26/high-dose gp140","Placebo")))
+
+meth.annotation = as.matrix(rownames(mat.v2)) 
+colnames(meth.annotation) = "Assay"
+
+
+```
+
+
+
+```{r,fig.width=15, fig.height= 5}
+h.v2 = Heatmap(mat.v2, name = "mat", 
+               row_split = factor(c("A", "A", "A", "A", "A",
+                                    "B", "B", "B", "B", "B",
+                                    "C", "C", "C", "C", "C",
+                                    "C", "C", "C", "C", "C", "C"), levels = LETTERS[1:3]) ,
+               column_split = factor(ann.v2[,1]),
+               na_col = "black", col = col_fun, 
+               top_annotation = ha.v2,
+               show_row_names = FALSE,
+               show_column_names = FALSE,
+               column_title = "Early vaccination",
+               rect_gp = gpar(col= "white"),
+               heatmap_legend_param = list(
+                                            title = "Immune response", at = c(0, 1, NA), 
+                                            labels = c("Non-responder", "Responder", "NA")
+                                          ),
+               )+
+        text
+
+h.v9 = Heatmap(mat.v9, name = "mat", 
+               na_col = "black", col = col_fun, 
+               column_split = factor(ann.v9[,1]),
+               top_annotation = ha.v9, 
+               show_row_names = TRUE,
+               show_column_names = FALSE,
+               column_title = "Late vaccination",
+               rect_gp = gpar(col= "white") 
+              )
+
+meth.name = as.matrix(c(" "," "," ","ELISA"," ", " "," ", " ", "ADCP", " "," ", " ", " "," "," "," "," ", "ELISpot"," "," "," "))
+
+ht_list = h.v2 + 
+          rowAnnotation(Assay = meth.annotation, col= list(Assay = c("esa_cla_call" = "#94AE89", 
+                                                      "esa_clb_call" = "#94AE89", 
+                                                      "esa_coc_call" = "#94AE89", 
+                                                      "esa_clc_call" = "#94AE89", 
+                                                      "esa_mos1_call" = "#94AE89", "adcp_cla_call" = "#7E89B8", 
+                                                                                   "adcp_clb_call" = "#7E89B8", 
+                                                                                   "adcp_coc_call" = "#7E89B8",
+                                                                                   "adcp_mos1_call" = "#7E89B8",
+                                                                                   "adcp_clc_call" = "#7E89B8",
+                                                      "pot_em1_call" = "#EAC250",
+                                                      "pot_em2_call" = "#EAC250",
+                                                      "pot_e1p_call" = "#EAC250",
+                                                      "pot_e2p_call" = "#EAC250",
+                                                      "pot_e3p_call" = "#EAC250",
+                                                      "pot_gp_call" = "#EAC250",
+                                                      "pot_gm1_call" = "#EAC250",
+                                                      "pot_gm2_call" = "#EAC250",
+                                                      "pot_pp_call" = "#EAC250",
+                                                      "pot_pm1_call" = "#EAC250",
+                                                      "pot_pm2_call" = "#EAC250")
+                                               ),
+                        fol = anno_text(meth.name, location = 0.5, just = "left",rot = 90, gp = gpar(fontsize = 9)), 
+                        show_annotation_name = c(Assay = FALSE),
+                        show_legend = FALSE) +
+          h.v9
+  
+
+
+draw(ht_list,merge_legends = TRUE, heatmap_legend_side = "left")
+
+```
+
+
+## Phylum-compostion-plots in V2 stool samples
+```{r, Phylum-compostion-plots in V2 stool samples}
+threshold = 0.01
+
+ps1.phylum_V2 <- ps1_V2 %>%
+  tax_glom(taxrank = "Phylum") %>%
+  transform_sample_counts(function(x) {x/sum(x)} ) %>%
+  psmelt %>%
+  filter(Abundance > threshold) %>%
+  arrange(Phylum, Abundance)
+
+Phylumcolor<-c("Fusobacteria"="#4575B4",
+               "Actinobacteria"= "#74ADD1",
+               "Proteobacteria"="#ABD9E9", 
+               "Elusimicrobia" = "#E0F3F8",
+               "Verrucomicrobia"="#FFFFBF",
+               "Spirochaetes"="#FEE090", 
+               "Bacteroidetes"= "#F46D43",
+               "Firmicutes"= "#D73027")
+###[1] "#A6CEE3" "#1F78B4" "#B2DF8A" "#33A02C" "#FB9A99" "#E31A1C"
+###[7] "#FDBF6F" "#FF7F00" "#CAB2D6" "#6A3D9A" "#FFFF99" "#B15928"
+
+p.cc.region_V2 <- ggplot(ps1.phylum_V2, aes(x = as.factor(sample_id), y = Abundance, fill = fct_reorder(Phylum, Abundance))) +
+  geom_bar(stat = "identity", width = 1) +
+  facet_grid(~sub_region, scales = "free", space = "free") +
+  scale_fill_manual(values = Phylumcolor)+
+  theme(axis.text.x = element_blank()) +
+  theme(axis.title.x = element_blank()) +
+  labs(fill = "Phylum")
+  #ggtitle("Phylum Composition in V2 Stool Samples")
+p.cc.region_V2
+
+```
+
+## Bacteriodetes:Firmicutes Ratio in V2 stool samples
+```{r ratios, v2,  fig.width=8, fig.height=4}
+# Adopted from @ Thomas W. Battaglia
+
+# @ Thomas W. Battaglia
+# https://github.com/twbattaglia/btools/blob/master/R/bf_ratio.R
+
+#' Computer Bacteroidetes/Firmicutes ratio for each sample.
+#'
+#' This function will compute the B/F ratio based on the relative abundances
+#' between the Bacteroidetes and Firmicutes phyla.
+#'
+#' @param phylo An input phyloseq object.
+#' @return A phyloseq object with 'log2_bf_ratio' as a new metadata column
+#' @export
+bf_ratio <- function(phylo){
+
+  # Check to make sure input is a phyloseq object
+  if(class(phylo)[1] != "phyloseq"){
+    message("Error, input is not a phyloseq object!")
+    return(NULL)
+  }
+
+  # Collapse on phyla
+  phyla <- phyloseq::tax_glom(physeq = phylo, taxrank = "Phylum")
+
+  # Find relative abundances
+  phyla_rel <- phyloseq::transform_sample_counts(phyla, function(x) { x/sum(x) } )
+
+  # Keep B/F taxa
+  tax_table(phyla_rel)
+  phyla_rel_bact <- otu_table(subset_taxa(phyla_rel, Phylum == "Bacteroidetes"))
+  phyla_rel_firm <- suppressWarnings(otu_table(subset_taxa(phyla_rel, Phylum == "Firmicutes")))
+
+  # OTU
+  bf_ratio <- log2(phyla_rel_bact /  phyla_rel_firm)
+
+  # Add to sample metadata
+  phyloseq::sample_data(phylo)$log2_bf_ratio <- as.numeric(bf_ratio)
+
+  # Return phyloseq object
+  return(phylo)
+}
+
+# BF ratios
+ps.bf.ratio_V2 <- bf_ratio(ps1_V2)
+sample_data(ps.bf.ratio_V2)$log2_bf_ratio
+
+sd.bf.ratio_V2 <- ps.bf.ratio_V2 %>%
+  sample_data() %>%
+  as_tibble() %>%
+  filter_all(all_vars(!is.infinite(.)))
+
+#Plot and compare
+p.bf.ratio_V2 <- ggboxplot(sd.bf.ratio_V2, x = "sub_region", y = "log2_bf_ratio", outlier.shape = NA, add = "jitter", color = "sub_region") +
+  stat_compare_means(comparisons = list(c("UG", "US")), method = "t.test", label = "p.signif", label.y = 2.8,label.x = 1.5) +
+  geom_hline(yintercept = 0, lty=2) +
+  labs(y="Bacteriodetes:Firmicutes Ratio (log2)") +
+  theme(axis.title.x = element_blank(), legend.position = "none")+ scale_color_lancet()
+p.bf.ratio_V2
+
+ratio_V2 <- plot_grid(NULL,p.bf.ratio_V2,ncol = 1, rel_heights = c(0.5,2))
+compostion_BF.ratio_Day_V2_sub_region <- plot_grid(p.cc.region_V2, ratio_V2, ncol = 2, labels = c("A", ""),  rel_widths = c(2,1))
+
+compostion_BF.ratio_Day_V2_sub_region
+
+```
+
+### Alpha-diversity analysis in V2 stool samples
+```{r alpha-diversity-group,v2, fig.width=8, fig.height=4}
+
+# Diversity calculations
+diversity_V2 <- as_tibble(estimate_richness(ps1_V2, measures = c("Observed", "Shannon")))
+# ignroe the warning message
+diversity_V2
+
+# Calculate Pielou’s evenness
+evenness_pielou_V2 <- as_tibble(microbiome::alpha(ps1_V2, index = "evenness_pielou"))
+evenness_pielou_V2
+
+# Bind sample data to diversity data and Pielou’s evenness
+sd_V2 <- as.tibble(sample_data(ps1_V2)) # useful to coerce the phyloseq object into an R data frame
+# ignore the warning message
+ps1.rich_V2 <- as.tibble(cbind(sd_V2, diversity_V2, evenness_pielou_V2)) # merge sd by row names
+
+ps1.rich_V2$group<- factor(ps1.rich_V2$group, levels = c("GROUP 1", "GROUP 2", "GROUP 3", "GROUP 4", "GROUP 5", "GROUP 6", "GROUP 7", "GROUP 8"))
+
+# Make a boxplot of samples' richness and diversity, grouped by region site
+
+regioncolor <- c("UG" ="#F8766D", "RW" = "#7CAE00", "US" = "#00BFC4")
+
+richnessPlot_Day_V2 <- ggplot(ps1.rich_V2,
+                       aes(x = sub_region, y = Observed)) +
+                       scale_color_manual(values=regioncolor)+
+                       geom_jitter(aes(color = sub_region), alpha = 0.65,
+                       position = position_jitter(width = 0.3)) +
+                       geom_boxplot(aes(color = sub_region), fill = "gray80", alpha = 0.25, width = 0.4)+
+                        ylab("Bacterial Richness") +
+                        xlab(" ") +
+                        #ggtitle("Richness (V2)") +
+                        theme_pubr() +
+                        theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+                        theme(axis.text.x = element_text(angle = 0, hjust = 0.5))+
+                        stat_compare_means(comparisons = list(c("UG", "US")), vjust = 0,label = "p.signif",label.y = 425, label.x = 1.5)+ scale_color_lancet()
+
+
+
+diversityPlot_Day_V2 <- ggplot(ps1.rich_V2,
+                        aes(x = sub_region, y = Shannon)) +
+    scale_color_manual(values=regioncolor)+
+                        geom_jitter(aes(color = sub_region), alpha = 0.65,cposition = position_jitter(width = 0.3)) +
+                        geom_boxplot(aes(color = sub_region), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Bacterial Shannon Diversity") +
+  xlab(" ") +
+  #ggtitle("Shannon Diversity (V2)") +
+  theme_pubr() +
+  #facet_wrap(~region) +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))+
+   stat_compare_means(comparisons = list(c("UG", "US")), vjust = 0,label = "p.signif",label.y = 5.25,label.x = 1.5)+ scale_color_lancet()
+
+
+
+evenness_Plot_Day_V2 <- ggplot(ps1.rich_V2,
+                       aes(x = sub_region, y = evenness_pielou)) +
+                       scale_color_manual(values=regioncolor)+
+                       geom_jitter(aes(color = sub_region), alpha = 0.65,
+                       position = position_jitter(width = 0.3)) +
+                       geom_boxplot(aes(color = sub_region), fill = "gray80", alpha = 0.25, width = 0.4)+
+                        ylab("Bacterial Pielou’s evenness") +
+                        xlab(" ") +
+                        #ggtitle("Richness (V2)") +
+                        theme_pubr() +
+                        theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+                        theme(axis.text.x = element_text(angle = 0, hjust = 0.5))+
+                        stat_compare_means(comparisons = list(c("UG", "US")), vjust = 0,label = "p.signif",label.y = 1, label.x = 1.5)+ scale_color_lancet()
+
+
+a <- plot_grid(NULL,richnessPlot_Day_V2,ncol = 1 ,rel_heights = c(.2,1))
+b <- plot_grid(NULL,diversityPlot_Day_V2,ncol = 1 ,rel_heights = c(.2,1))
+c <- plot_grid(NULL,evenness_Plot_Day_V2,ncol = 1 ,rel_heights = c(.2,1))
+
+a_diversity_v2 <- plot_grid(a, b, c, ncol = 3, labels = c("B", "", ""), rel_widths = c(1,1,1)) 
+ 
+a_diversity_v2 
+```
+
+```{r ordination}
+# Calculate ordinations
+
+ord.pcoa.uni_V2 <- ordinate(ps1_V2, method = "PCoA", distance = "unifrac")
+evals.uni_V2 <- ord.pcoa.uni_V2$values$Eigenvalues
+ord.pcoa.wuni_V2 <- ordinate(ps1_V2, method = "PCoA", distance = "wunifrac")
+evals.wuni_V2 <- ord.pcoa.wuni_V2$values$Eigenvalues
+
+```
+
+### PCOA analysis in V2 stool samples
+```{r ordination-plots, All samples in V2, fig.width=16, fig.height=4}
+## Ordination plots all samples
+# Unifrac
+p.pcoa.uni.region_V2 <- plot_ordination(ps1_V2, ord.pcoa.uni_V2, color = "sub_region", axes = c(1,2)) +
+  geom_point(size = 2) +
+  labs(title = "Unweighted UniFrac Distances", color = "Geographic Region") +
+  stat_ellipse(type = "norm", linetype = 2) + 
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  coord_fixed(sqrt(evals.uni_V2[2] / evals.uni_V2[1]))+
+  theme(legend.position="none")+
+  annotate("text", x=0.3, y=-0.23, label ="ADONIS\np = 0.001", col = "black")+
+  scale_color_lancet()
+p.pcoa.uni.region_V2
+
+# Weighted Unifrac
+p.pcoa.wuni.region_V2 <- plot_ordination(ps1_V2, ord.pcoa.wuni_V2, color = "sub_region", axes = c(1,2)) +
+  geom_point(size = 2) +
+  labs(title = "Weighted UniFrac Distances", color = "Geographic Region") +
+  stat_ellipse(type = "norm", linetype = 2) + 
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  coord_fixed(sqrt(evals.wuni_V2[2] / evals.wuni_V2[1]))+
+  annotate("text", x=0.5, y=-0.18, label ="ADONIS\np = 0.003", col = "black")+
+  scale_color_lancet()
+p.pcoa.wuni.region_V2
+
+p.pcoa.wuni.region_V2A <- p.pcoa.wuni.region_V2 + theme(legend.position="none")
+
+  # extract the legend from one of the plots
+legend <- get_legend(p.pcoa.wuni.region_V2)
+
+PCOA.V2 <- plot_grid(p.pcoa.uni.region_V2, p.pcoa.wuni.region_V2A, align = 'vh')
+
+b_diversity_v2 <- plot_grid(PCOA.V2, legend, labels = c("C", ""), rel_widths = c(1,.1), nrow = 1)
+
+b_diversity_v2 
+
+```
+
+### beta-adonis test for PCOA analysis in V2 stool samples
+```{r beta-adonis}
+set.seed(46395617)
+# Unifrac
+bdist_unf <- phyloseq::distance(ps1_V2, "unifrac")
+col_unf <- as(sample_data(ps1_V2), "data.frame")[, "sub_region"]
+adonis.bdist_unf <- adonis(bdist_unf ~ col_unf)
+adonis.bdist_unf
+
+# Weighted Unifrac
+bdist_wunf <- phyloseq::distance(ps1_V2, "wunifrac")
+col_wunf <- as(sample_data(ps1_V2), "data.frame")[, "sub_region"]
+adonis.bdist_wunf <- adonis(bdist_wunf ~ col_wunf)
+adonis.bdist_wunf
+```
+
+##Figure 1 old
+```{r, 16s Fig 1, fig.width=16, fig.height=8}
+
+FIG1AB <- plot_grid(compostion_BF.ratio_Day_V2_sub_region,NULL, a_diversity_v2, nrow = 1, rel_widths =  c(1,.1,1))
+          
+          
+plot_grid(FIG1AB, NULL, b_diversity_v2, ncol = 1, rel_heights =  c(1,.1,1))
+      
+```
+
+
+## Phylum-compostion-plots in V9 stool samples
+```{r, Phylum-compostion-plots in V2 stool samples}
+threshold = 0.01
+
+ps1.phylum_V9 <- ps1_V9 %>%
+  tax_glom(taxrank = "Phylum") %>%
+  transform_sample_counts(function(x) {x/sum(x)} ) %>%
+  psmelt %>%
+  filter(Abundance > threshold) %>%
+  arrange(Phylum, Abundance)
+
+p.cc.region_V9 <- ggplot(ps1.phylum_V9, aes(x = as.factor(sample_id), y = Abundance, fill = fct_reorder(Phylum, Abundance))) +
+  geom_bar(stat = "identity", width = 1) +
+  facet_grid(~sub_region, scales = "free", space = "free")  +
+   scale_fill_manual(values = Phylumcolor)+
+  theme(axis.text.x = element_blank()) +
+  theme(axis.title.x = element_blank()) +
+  labs(fill = "Phylum")
+p.cc.region_V9
+
+```
+
+## Bacteriodetes:Firmicutes Ratio in V9 stool samples
+```{r ratios, v9}
+# Adopted from @ Thomas W. Battaglia
+
+# @ Thomas W. Battaglia
+# https://github.com/twbattaglia/btools/blob/master/R/bf_ratio.R
+
+#' Computer Bacteroidetes/Firmicutes ratio for each sample.
+#'
+#' This function will compute the B/F ratio based on the relative abundances
+#' between the Bacteroidetes and Firmicutes phyla.
+#'
+#' @param phylo An input phyloseq object.
+#' @return A phyloseq object with 'log2_bf_ratio' as a new metadata column
+#' @export
+bf_ratio <- function(phylo){
+
+  # Check to make sure input is a phyloseq object
+  if(class(phylo)[1] != "phyloseq"){
+    message("Error, input is not a phyloseq object!")
+    return(NULL)
+  }
+
+  # Collapse on phyla
+  phyla <- phyloseq::tax_glom(physeq = phylo, taxrank = "Phylum")
+
+  # Find relative abundances
+  phyla_rel <- phyloseq::transform_sample_counts(phyla, function(x) { x/sum(x) } )
+
+  # Keep B/F taxa
+  tax_table(phyla_rel)
+  phyla_rel_bact <- otu_table(subset_taxa(phyla_rel, Phylum == "Bacteroidetes"))
+  phyla_rel_firm <- suppressWarnings(otu_table(subset_taxa(phyla_rel, Phylum == "Firmicutes")))
+
+  # OTU
+  bf_ratio <- log2(phyla_rel_bact /  phyla_rel_firm)
+
+  # Add to sample metadata
+  phyloseq::sample_data(phylo)$log2_bf_ratio <- as.numeric(bf_ratio)
+
+  # Return phyloseq object
+  return(phylo)
+}
+
+# BF ratios
+ps.bf.ratio_V9 <- bf_ratio(ps1_V9)
+sample_data(ps.bf.ratio_V9)$log2_bf_ratio
+
+sd.bf.ratio_V9 <- ps.bf.ratio_V9 %>%
+  sample_data() %>%
+  as_tibble() %>%
+  filter_all(all_vars(!is.infinite(.)))
+
+res.kruskal_bf_Day_V9 <- sd.bf.ratio_V9 %>% kruskal_test(log2_bf_ratio ~ sub_region)
+res.kruskal_bf_Day_V9 
+
+pwc_bf_Day_V9 <- sd.bf.ratio_V9 %>% dunn_test(log2_bf_ratio ~ sub_region, p.adjust.method = "BH") 
+pwc_bf_Day_V9  
+pwc_bf_Day_V9 <- pwc_bf_Day_V9 %>% add_xy_position(x = "sub_region") %>% mutate(y.position = c(3, 3.5, 4))
+
+#Plot and compare
+regioncolor <- c("UG" ="#00468BFF", "RW" = "#42B540FF", "US" = "#ED0000FF")
+p.bf.ratio_V9 <- ggboxplot(sd.bf.ratio_V9, x = "sub_region", y = "log2_bf_ratio", outlier.shape = NA, add = "jitter", color = "sub_region") +
+    scale_color_manual(values=regioncolor)+
+  #stat_compare_means(method = "t.test", label = "p.format", label.y = 2.7) +
+  geom_hline(yintercept = 0, lty=2) +
+  labs(y="Bacteriodetes:Firmicutes Ratio (log2)") +
+  theme(axis.title.x = element_blank())+
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))+
+    theme(plot.subtitle = element_text(size = 6))  +
+  stat_pvalue_manual(pwc_bf_Day_V9, hide.ns = TRUE)+
+  labs(
+    #subtitle = get_test_label(res.kruskal_bf_Day_V9, detailed = TRUE),
+    #caption = get_pwc_label(pwc_bf_Day_V9)
+    )
+p.bf.ratio_V9
+
+ratio_V9 <- plot_grid(NULL,p.bf.ratio_V9,ncol = 1, rel_heights = c(0.5,2))
+compostion_BF.ratio_Day_V9_sub_region <- plot_grid(p.cc.region_V9, ratio_V9, ncol = 2, align = 'V', labels = c("A", ""),  rel_widths = c(2,1))
+
+compostion_BF.ratio_Day_V9_sub_region
+```
+
+### Alpha-diversity analysis in V9 stool samples
+```{r alpha-diversity-group,v9, fig.width=8, fig.height=4}
+# Diversity calculations
+diversity_V9 <- as_tibble(estimate_richness(ps1_V9, measures = c("Observed", "Shannon")))
+# ignroe the warning message
+diversity_V9
+
+# Calculate Pielou’s evenness
+evenness_pielou_V9 <- as_tibble(microbiome::alpha(ps1_V9, index = "evenness_pielou"))
+evenness_pielou_V9
+
+
+# Bind sample data to diversity data
+sd_V9 <- as.tibble(sample_data(ps1_V9)) # useful to coerce the phyloseq object into an R data frame
+# ignore the warning message
+ps1.rich_V9 <- as.tibble(cbind(sd_V9, diversity_V9,evenness_pielou_V9)) # merge sd by row names
+
+ps1.rich_V9$group<- factor(ps1.rich_V9$group, levels = c("GROUP 1", "GROUP 2", "GROUP 3", "GROUP 4", "GROUP 5", "GROUP 6", "GROUP 7", "GROUP 8"))
+
+# kruskal-dunn_test
+regioncolor <- c("UG" ="#00468BFF", "RW" = "#42B540FF", "US" = "#ED0000FF")
+##
+res.kruskal_richness_Day_V9_region <- ps1.rich_V9 %>% kruskal_test(Observed ~ sub_region)
+res.kruskal_richness_Day_V9_region
+
+pwc_richness_Day_V9_region <- ps1.rich_V9  %>%
+  dunn_test(Observed ~ sub_region, p.adjust.method = "BH") 
+
+pwc_richness_Day_V9_region  <- pwc_richness_Day_V9_region %>% add_xy_position(x = "sub_region")
+pwc_richness_Day_V9_region
+##
+res.kruskal_Shannon_Day_V9_region <- ps1.rich_V9 %>% kruskal_test(Shannon~ sub_region)
+res.kruskal_Shannon_Day_V9_region
+
+pwc_Shannon_Day_V9_region <- ps1.rich_V9 %>% dunn_test(Shannon ~ sub_region, p.adjust.method = "BH") 
+
+pwc_Shannon_Day_V9_region <- pwc_Shannon_Day_V9_region %>% add_xy_position(x = "sub_region")
+
+pwc_Shannon_Day_V9_region 
+##
+res.kruskal_evenness_pielou_V9_region <- ps1.rich_V9 %>% kruskal_test(evenness_pielou~ sub_region)
+res.kruskal_evenness_pielou_V9_region
+
+pwc_evenness_pielou_Day_V9_region <- ps1.rich_V9 %>% dunn_test(evenness_pielou ~ sub_region, p.adjust.method = "BH") 
+
+pwc_evenness_pielou_Day_V9_region <- pwc_evenness_pielou_Day_V9_region %>% add_xy_position(x = "sub_region")
+
+pwc_evenness_pielou_Day_V9_region 
+
+# Make a boxplot of samples' richness and diversity, grouped by region site
+my_comparisons <- list(c("UG", "US"), c("RW", "UG"), c("RW", "US"))
+
+richnessPlot_Day_V9 <- ggplot(ps1.rich_V9,
+                       aes(x = sub_region, y = Observed)) + ylim(0,600)+
+                       scale_color_manual(values=regioncolor)+
+                       geom_jitter(aes(color = sub_region), alpha = 0.65,
+                       position = position_jitter(width = 0.3)) +
+                       geom_boxplot(aes(color = sub_region), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Bacterial Richness") +
+  xlab(" ") +
+  #ggtitle("Richness (V9)") +
+  theme_pubr() +
+  #facet_wrap(~region) +
+  theme(plot.title = element_text(hjust = 0.5, vjust = 1.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))+
+    theme(plot.subtitle = element_text(size = 8))  +
+  stat_compare_means(comparisons = my_comparisons, label = "p.signif", label.y = c(450, 515, 570))+
+  #stat_compare_means(label.y = 650,label.x = 1.2)
+  #stat_pvalue_manual(pwc_richness_Day_V9_region, hide.ns = TRUE)+
+  labs(
+    #subtitle = get_test_label(res.kruskal_richness_Day_V9_region, detailed = TRUE),
+    #caption = get_pwc_label(pwc_richness_Day_V9_region)
+    )
+
+
+
+diversityPlot_Day_V9 <- ggplot(ps1.rich_V9,
+                        aes(x = sub_region, y = Shannon)) +
+    scale_color_manual(values=regioncolor)+
+                        geom_jitter(aes(color = sub_region), alpha = 0.65,cposition = position_jitter(width = 0.3)) +
+                        geom_boxplot(aes(color = sub_region), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Bacterial Shannon Diversity") +
+  xlab(" ") +
+  #ggtitle("Shannon Diversity (V9)") +
+  theme_pubr() +
+  #facet_wrap(~region) +
+  theme(plot.title = element_text(hjust = 0.5, vjust = 1.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))+
+  theme(plot.subtitle = element_text(size = 8))  + 
+  stat_compare_means(comparisons = my_comparisons, label = "p.signif")+
+   #stat_compare_means(label.y = 6.5,label.x = 1.2)
+    #stat_pvalue_manual(pwc_Shannon_Day_V9_region, hide.ns = TRUE)+
+  labs(
+    #subtitle = get_test_label(res.kruskal_richness_Day_V9_region, detailed = TRUE),
+    #caption = get_pwc_label(pwc_Shannon_Day_V9_region)
+    )
+######
+evennessPlot_Day_V9 <- ggplot(ps1.rich_V9,
+                       aes(x = sub_region, y = evenness_pielou)) + ylim(0,1.25)+
+                       scale_color_manual(values=regioncolor)+
+                       geom_jitter(aes(color = sub_region), alpha = 0.65,
+                       position = position_jitter(width = 0.3)) +
+                       geom_boxplot(aes(color = sub_region), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Bacterial Pielou’s evenness") +
+  xlab(" ") +
+  #ggtitle("Richness (V9)") +
+  theme_pubr() +
+  #facet_wrap(~region) +
+  theme(plot.title = element_text(hjust = 0.5, vjust = 1.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))+
+    theme(plot.subtitle = element_text(size = 8))  +
+  stat_compare_means(comparisons = my_comparisons, label = "p.signif", label.y = c(0.9, 1, 1.15))+
+  #stat_compare_means(label.y = 650,label.x = 1.2)
+  #stat_pvalue_manual(pwc_evenness_pielou_Day_V9_region, hide.ns = TRUE)+
+  labs(
+    #subtitle = get_test_label(res.kruskal_evenness_pielou_Day_V9_region, detailed = TRUE),
+    #caption = get_pwc_label(pwc_evenness_pielou_Day_V9_region)
+    )
+
+a9 <- plot_grid(NULL,richnessPlot_Day_V9,ncol = 1 ,rel_heights = c(.2,1))
+b9 <- plot_grid(NULL,diversityPlot_Day_V9,ncol = 1 ,rel_heights = c(.2,1))
+c9 <- plot_grid(NULL,evennessPlot_Day_V9,ncol = 1 ,rel_heights = c(.2,1))
+
+a_diversity_v9 <- plot_grid(a9, b9, c9, ncol = 3, labels = c("B", "", ""), rel_widths = c(1,1,1))
+
+a_diversity_v9
+```
+
+```{r ordination, v9}
+# Calculate ordinations
+
+ord.pcoa.uni_V9 <- ordinate(ps1_V9, method = "PCoA", distance = "unifrac")
+evals.uni_V9 <- ord.pcoa.uni_V9$values$Eigenvalues
+ord.pcoa.wuni_V9 <- ordinate(ps1_V9, method = "PCoA", distance = "wunifrac")
+evals.wuni_V9 <- ord.pcoa.wuni_V9$values$Eigenvalues
+
+```
+
+### PCOA analysis in V9 stool samples
+```{r ordination-plots, All samples in V9, fig.width=16, fig.height=4}
+## Ordination plots all samples
+regioncolor <- c("UG" ="#00468BFF", "RW" = "#42B540FF", "US" = "#ED0000FF")
+
+# Unifrac
+p.pcoa.uni.region_V9 <- plot_ordination(ps1_V9, ord.pcoa.uni_V9, color = "sub_region", axes = c(1,2)) +
+    scale_color_manual(values=regioncolor)+
+  geom_point(size = 2) +
+  labs(title = "Unweighted UniFrac Distances", color = "Geographic Region") +
+  stat_ellipse(type = "norm", linetype = 2) + 
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="none")+
+  coord_fixed(sqrt(evals.uni_V9[2] / evals.uni_V9[1]))+
+  annotate("text", x=0.35, y=-0.2, label ="ADONIS\nRW - UG p = 0.002\nRW - US p = 0.001\nUG - US p = 0.001", col = "black")
+p.pcoa.uni.region_V9
+
+# Weighted Unifrac
+p.pcoa.wuni.region_V9 <- plot_ordination(ps1_V9, ord.pcoa.wuni_V9, color = "sub_region", axes = c(1,2)) +
+    scale_color_manual(values=regioncolor)+
+  geom_point(size = 2) +
+  labs(title = "Weighted UniFrac Distances ", color = "Geographic Region") +
+  stat_ellipse(type = "norm", linetype = 2) + 
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  coord_fixed(sqrt(evals.wuni_V9[2] / evals.wuni_V9[1]))+
+  annotate("text", x=0.4, y=-0.2, label ="ADONIS\nRW - UG p = 0.003\nRW - US p = 0.001\nUG - US p = 0.001", col = "black")
+p.pcoa.wuni.region_V9
+
+p.pcoa.wuni.region_V9A <- p.pcoa.wuni.region_V9 + theme(legend.position="none")
+
+  # extract the legend from one of the plots
+legend <- get_legend(p.pcoa.wuni.region_V9)
+
+PCOA.V9 <- plot_grid(p.pcoa.uni.region_V9, p.pcoa.wuni.region_V9A, align = 'vh')
+
+b_diversity_v9 <- plot_grid(PCOA.V9, legend, labels = c("C", ""), rel_widths = c(1,.1), nrow = 1)
+
+b_diversity_v9 
+
+```
+
+### beta-adonis test for PCOA analysis in V9 stool samples
+
+```{r beta-adonis}
+# Subset group for beta-adonis
+
+ps1_V9_RWUG <- subset_samples(ps1_V9, region == "AFRICA")
+
+ps1_V9_RWUS <- subset_samples(ps1_V9, sub_region != "UG")
+
+ps1_V9_USUG <- subset_samples(ps1_V9, sub_region != "RW") 
+
+```
+
+```{r beta-adonis,V9_RWUG}
+set.seed(46395617)
+# Unifrac
+bdist_unf_V9_RWUG <- phyloseq::distance(ps1_V9_RWUG, "unifrac")
+col_unf_V9_RWUG <- as(sample_data(ps1_V9_RWUG), "data.frame")[, "sub_region"]
+adonis.bdist_unf_V9_RWUG <- adonis(bdist_unf_V9_RWUG ~ col_unf_V9_RWUG)
+adonis.bdist_unf_V9_RWUG
+
+# Weighted Unifrac
+bdist_wunf_V9_RWUG <- phyloseq::distance(ps1_V9_RWUG, "wunifrac")
+col_wunf_V9_RWUG <- as(sample_data(ps1_V9_RWUG), "data.frame")[, "sub_region"]
+adonis.bdist_wunf_V9_RWUG <- adonis(bdist_wunf_V9_RWUG ~ col_wunf_V9_RWUG)
+adonis.bdist_wunf_V9_RWUG
+```
+
+```{r beta-adonis,V9_RWUS}
+set.seed(46395617)
+# Unifrac
+bdist_unf_V9_RWUS <- phyloseq::distance(ps1_V9_RWUS, "unifrac")
+col_unf_V9_RWUS <- as(sample_data(ps1_V9_RWUS), "data.frame")[, "sub_region"]
+adonis.bdist_unf_V9_RWUS <- adonis(bdist_unf_V9_RWUS ~ col_unf_V9_RWUS)
+adonis.bdist_unf_V9_RWUS
+
+# Weighted Unifrac
+bdist_wunf_V9_RWUS <- phyloseq::distance(ps1_V9_RWUS, "wunifrac")
+col_wunf_V9_RWUS <- as(sample_data(ps1_V9_RWUS), "data.frame")[, "sub_region"]
+adonis.bdist_wunf_V9_RWUS <- adonis(bdist_wunf_V9_RWUS ~ col_wunf_V9_RWUS)
+adonis.bdist_wunf_V9_RWUS
+```
+
+```{r beta-adonis,V9_USUG}
+set.seed(46395617)
+# Unifrac
+bdist_unf_V9_USUG <- phyloseq::distance(ps1_V9_USUG, "unifrac")
+col_unf_V9_USUG <- as(sample_data(ps1_V9_USUG), "data.frame")[, "sub_region"]
+adonis.bdist_unf_V9_USUG <- adonis(bdist_unf_V9_USUG ~ col_unf_V9_USUG)
+adonis.bdist_unf_V9_USUG
+
+# Weighted Unifrac
+bdist_wunf_V9_USUG <- phyloseq::distance(ps1_V9_USUG, "wunifrac")
+col_wunf_V9_USUG <- as(sample_data(ps1_V9_USUG), "data.frame")[, "sub_region"]
+adonis.bdist_wunf_V9_USUG <- adonis(bdist_wunf_V9_USUG ~ col_wunf_V9_USUG)
+adonis.bdist_wunf_V9_USUG
+```
+
+##Figure 2 old
+```{r 16s Fig 2, fig.width=16, fig.height=8}
+
+FIG2AB <- plot_grid(compostion_BF.ratio_Day_V9_sub_region,NULL, a_diversity_v9, nrow = 1, rel_widths =  c(1,.1,1))
+          
+          
+plot_grid(FIG2AB, NULL, b_diversity_v9, ncol = 1, rel_heights =  c(1,.1,1))
+
+```
+
+##Figure 1 New 
+## Combine Early and late 16S analysis
+```{r 16s Fig 1, fig.width=16, fig.height=16}
+
+```
+
+
+
+
+### alpha-diversity analysis between vaccine or placebo group in V2 stool samples
+```{r alpha-diversity-group,v2, Vaccine VS placebo, fig.width=8, fig.height=5}
+# Make a boxplot of samples' richness and diversity, grouped by Site
+vaccinecolor <- c("placebo" ="#868686FF", "vaccine" = "#0073c2ff")
+
+richnessPlot_Day_V2_sub_region_Vaccine <- ggplot(ps1.rich_V2 %>% filter(vaccine_group != "NA"),
+                       aes(x = vaccine_group, y = Observed)) +
+  #geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = vaccine_group), alpha = 0.65,
+                position = position_jitter(width = 0.3)) +
+  geom_boxplot(aes(color = vaccine_group), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Bacterial Richness") +
+  xlab(" ") +
+  ##ggtitle("Richness (V2)") +
+  theme_pubr() +
+  scale_color_manual(values=vaccinecolor)+
+  facet_wrap(~sub_region) +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  stat_compare_means(comparisons = list(c("placebo", "vaccine")), method = "t.test", label = "p.signif", vjust = 0, label.x = 1.5,label.y = 365) 
+  
+  
+diversityPlot_Day_V2_sub_region_Vaccine <- ggplot(ps1.rich_V2 %>% filter(vaccine_group != "NA"),
+                        aes(x = vaccine_group, y = Shannon)) +
+                        geom_jitter(aes(color = vaccine_group), alpha = 0.65,cposition = position_jitter(width = 0.3)) +
+                        geom_boxplot(aes(color = vaccine_group), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Bacterial\nShannon Diversity") +
+  xlab(" ") +
+  ##ggtitle("Shannon Diversity (V2)") +
+  theme_pubr() +
+  scale_color_manual(values=vaccinecolor)+
+  facet_wrap(~sub_region) +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  stat_compare_means(comparisons = list(c("placebo", "vaccine")), method = "t.test", label = "p.signif", vjust = 0, label.x = 1.5,label.y = 4.4)
+
+alphadiversity_v2_vaccine <- ggarrange(richnessPlot_Day_V2_sub_region_Vaccine,diversityPlot_Day_V2_sub_region_Vaccine, ncol = 2, labels = c("A", "B")) 
+
+
+
+alphadiversity_v2_vaccine <- annotate_figure(alphadiversity_v2_vaccine,
+               top = text_grob("Early Vaccination", face = "bold", size = 14))
+
+alphadiversity_v2_vaccine
+```
+
+```{r}
+# Bacteriodetes:Firmicutes Ratio in V2 stool samples
+#Plot and compare
+
+p.bf.ratio_V2_sub_region_Vaccine <- ggplot(sd.bf.ratio_V2, aes(x = vaccine_group, y = log2_bf_ratio)) +
+    geom_jitter(aes(color = vaccine_group), alpha = 0.65,
+                position = position_jitter(width = 0.3)) +
+    geom_boxplot(aes(color = vaccine_group), fill = "gray80", alpha = 0.25, width = 0.4)+
+    ylab("Bacteriodetes:Firmicutes Ratio (log2)") +
+    xlab(" ") +
+    theme_pubr() +
+    scale_color_manual(values=vaccinecolor)+
+    facet_wrap(~sub_region)+ 
+    theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+    geom_hline(yintercept = 0, lty=2)+
+    theme(axis.title.x = element_blank(), legend.position = "none")+
+    stat_compare_means(comparisons = list(c("placebo", "vaccine")), method = "t.test", label = "p.signif", label.y = 2.8,label.x = 1.5) 
+   
+p.bf.ratio_V2_sub_region_Vaccine
+
+# Bacteriodetes:Firmicutes Ratio in V9 stool samples
+#Plot and compare
+
+p.bf.ratio_V9_sub_region_Vaccine <- ggplot(sd.bf.ratio_V9, aes(x = vaccine_group, y = log2_bf_ratio)) +
+    geom_jitter(aes(color = vaccine_group), alpha = 0.65,
+                position = position_jitter(width = 0.3)) +
+    geom_boxplot(aes(color = vaccine_group), fill = "gray80", alpha = 0.25, width = 0.4)+
+    ylab("Bacteriodetes:Firmicutes Ratio (log2)") +
+    xlab(" ") +
+    theme_pubr() +
+    scale_color_manual(values=vaccinecolor)+
+    facet_wrap(~sub_region)+ 
+    theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+    geom_hline(yintercept = 0, lty=2)+
+    theme(axis.title.x = element_blank(), legend.position = "none")+
+    stat_compare_means(comparisons = list(c("placebo", "vaccine")), method = "t.test", label = "p.signif", label.y = 2.8,label.x = 1.5) 
+   
+p.bf.ratio_V9_sub_region_Vaccine
+```
+
+
+
+
+### beta-adonis test for PCOA analysis in V2 stool samples
+```{r beta-adonis}
+# Subset group for beta-adonis
+
+ps1_V2_UG <- subset_samples(ps1_V2, sub_region == "UG")
+
+ps1_V2_US <- subset_samples(ps1_V2, sub_region == "US")
+
+```
+
+```{r beta-adonis,V2 UG}
+set.seed(46395617)
+# Unifrac
+bdist_unf_UG <- phyloseq::distance(ps1_V2_UG, "unifrac")
+col_unf_UG <- as(sample_data(ps1_V2_UG), "data.frame")[, "vaccine_group"]
+adonis.bdist_unf_UG <- adonis(bdist_unf_UG ~ col_unf_UG)
+adonis.bdist_unf_UG
+
+# Weighted Unifrac
+bdist_wunf_UG <- phyloseq::distance(ps1_V2_UG, "wunifrac")
+col_wunf_UG <- as(sample_data(ps1_V2_UG), "data.frame")[, "vaccine_group"]
+adonis.bdist_wunf_UG <- adonis(bdist_wunf_UG ~ col_wunf_UG)
+adonis.bdist_wunf_UG
+```
+
+```{r beta-adonis,V2 US}
+set.seed(46395617)
+# Unifrac
+bdist_unf_US <- phyloseq::distance(ps1_V2_US, "unifrac")
+col_unf_US <- as(sample_data(ps1_V2_US), "data.frame")[, "vaccine_group"]
+adonis.bdist_unf_US <- adonis(bdist_unf_US ~ col_unf_US)
+adonis.bdist_unf_US
+
+# Weighted Unifrac
+bdist_wunf_US <- phyloseq::distance(ps1_V2_US, "wunifrac")
+col_wunf_US <- as(sample_data(ps1_V2_US), "data.frame")[, "vaccine_group"]
+adonis.bdist_wunf_US <- adonis(bdist_wunf_US ~ col_wunf_US)
+adonis.bdist_wunf_US
+```
+
+```{r ordination}
+# Calculate ordinations
+# make the ordination plots separately
+
+ord.pcoa.uni_V2_UG <- ordinate(ps1_V2_UG, method = "PCoA", distance = "unifrac")
+evals.uni_V2_UG <- ord.pcoa.uni_V2_UG$values$Eigenvalues
+ord.pcoa.wuni_V2_UG <- ordinate(ps1_V2_UG, method = "PCoA", distance = "wunifrac")
+evals.wuni_V2_UG <- ord.pcoa.wuni_V2_UG$values$Eigenvalues
+
+ord.pcoa.uni_V2_US <- ordinate(ps1_V2_US, method = "PCoA", distance = "unifrac")
+evals.uni_V2_US <- ord.pcoa.uni_V2_US$values$Eigenvalues
+ord.pcoa.wuni_V2_US <- ordinate(ps1_V2_US, method = "PCoA", distance = "wunifrac")
+evals.wuni_V2_US <- ord.pcoa.wuni_V2_US$values$Eigenvalues
+```
+
+```{r ordination-plots, Samples by vaccine or placebo group in V2}
+## Ordination plots all samples
+# Unifrac
+# make the ordination plots separately 
+# V2-UG UNWeighted Unifrac
+p.pcoa.uni.subregion_V2_UG_vaccine <- plot_ordination(ps1_V2_UG, ord.pcoa.uni_V2_UG, color = "vaccine_group", axes = c(1,2)) +
+  geom_point(size = 2) +
+  labs(title = "Unweighted UniFrac Distances ", subtitle = "UG", color = "Vaccine Group") +
+  #stat_ellipse(type = "norm", linetype = 2) +
+  scale_color_manual(values=vaccinecolor)+
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="none",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold")) 
+
+p.pcoa.uni.subregion_V2_UG_vaccine 
+
+## V2-UG Weighted Unifrac
+p.pcoa.wuni.subregion_V2_UG_vaccine <- plot_ordination(ps1_V2_UG, ord.pcoa.wuni_V2_UG, color = "vaccine_group", axes = c(1,2)) +
+  geom_point(size = 2) +
+  labs(title = "Weighted UniFrac Distances ", subtitle = "UG", color = "Vaccine Group") +
+  scale_color_hue(labels = c("Placebo", "Vaccine"))+
+    #stat_ellipse(type = "norm", linetype = 2) +
+  scale_color_manual(values=vaccinecolor)+
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="bottom",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold")) 
+p.pcoa.wuni.subregion_V2_UG_vaccine
+
+p.pcoa.wuni.subregion_V2_UG_vaccineA <- p.pcoa.wuni.subregion_V2_UG_vaccine + theme(legend.position="none")
+
+# V2-US UNWeighted Unifrac
+p.pcoa.uni.subregion_V2_US_vaccine <- plot_ordination(ps1_V2_US, ord.pcoa.uni_V2_US, color = "vaccine_group", axes = c(1,2)) +
+  geom_point(size = 2) +
+  labs(title = " ", subtitle = "US", color = "Vaccine Group") +
+  #stat_ellipse(type = "norm", linetype = 2) +
+  scale_color_manual(values=vaccinecolor)+
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="none",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold")) +
+  annotate("text", x=0.3, y=0.25, label ="ADONIS\n p = 0.918", col = "black")
+
+p.pcoa.uni.subregion_V2_US_vaccine 
+
+## V2-US Weighted Unifrac
+p.pcoa.wuni.subregion_V2_US_vaccine <- plot_ordination(ps1_V2_US, ord.pcoa.wuni_V2_US, color = "vaccine_group", axes = c(1,2)) +
+  geom_point(size = 2) +
+  labs(title = " ", subtitle = "US",color = "Vaccine Group") +
+  scale_color_hue(labels = c("Placebo", "Vaccine"))+
+    #stat_ellipse(type = "norm", linetype = 2) +
+  scale_color_manual(values=vaccinecolor)+
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="none",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold")) +  
+  annotate("text", x=0.2, y=0.05, label ="ADONIS\n p = 0.315", col = "black")
+p.pcoa.wuni.subregion_V2_US_vaccine
+
+  # extract the legend from one of the plots
+
+##legend <- get_legend(p.pcoa.wuni.subregion_V2_UG_vaccine)
+
+vaccine.PCOA.V2 <- ggarrange(
+  ggarrange(p.pcoa.uni.subregion_V2_UG_vaccine, p.pcoa.wuni.subregion_V2_UG_vaccineA, align = c("h"), ncol =1),
+  ggarrange(p.pcoa.uni.subregion_V2_US_vaccine,p.pcoa.wuni.subregion_V2_US_vaccine, align = c("h"), ncol =1),
+  ncol = 2,align = c("v"), labels = c("C", ""))
+
+legend <- get_legend(p.pcoa.wuni.subregion_V2_UG_vaccine)
+
+b_diversity_vaccine.v2 <- plot_grid(vaccine.PCOA.V2, legend,  rel_heights = c(1,.1), ncol = 1)
+
+b_diversity_vaccine.v2
+
+```
+
+##Figure 3
+```{r, Fig 3,fig.width=8, fig.height=9}
+
+ggarrange(alphadiversity_v2_vaccine,                          # First row with scatter plot
+          b_diversity_vaccine.v2, # Second row with box and dot plots
+          nrow = 2, heights = c(3,6)
+          ) 
+```
+
+### alpha-diversity analysis between vaccine or placebo group in V9 stool samples
+```{r alpha-diversity-group,v9,Vaccine VS placebo, fig.width=16, fig.height=5}
+# Make a boxplot of samples' richness and diversity, grouped by Site
+
+richnessPlot_Day_V9_sub_region_Vaccine <- ggplot(ps1.rich_V9 ,
+                       aes(x = vaccine_group, y = Observed)) +
+  #geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = vaccine_group), alpha = 0.65,
+                position = position_jitter(width = 0.3)) +
+  geom_boxplot(aes(color = vaccine_group), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Bacterial Richness") +
+  xlab(" ") +
+  #ggtitle("Richness (V9)") +
+  scale_color_manual(values=vaccinecolor)+
+  theme_pubr() +
+  facet_wrap(~sub_region) +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  stat_compare_means(comparisons = list(c("placebo", "vaccine")), method = "t.test", label = "p.signif", vjust = 0, label.x = 1.5, label.y = 500) 
+  
+  
+diversityPlot_Day_V9_sub_region_Vaccine <- ggplot(ps1.rich_V9,
+                        aes(x = vaccine_group, y = Shannon)) +
+                        geom_jitter(aes(color = vaccine_group), alpha = 0.65,cposition = position_jitter(width = 0.3)) +
+                        geom_boxplot(aes(color = vaccine_group), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Bacterial\nShannon Diversity") +
+  xlab(" ") +
+  #ggtitle("Shannon Diversity (V9)") +
+  scale_color_manual(values=vaccinecolor)+
+  theme_pubr() +
+  facet_wrap(~sub_region) +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  stat_compare_means(comparisons = list(c("placebo", "vaccine")), method = "t.test", label = "p.signif",vjust = 0, label.x = 1.5, label.y = 5   ) 
+
+alphadiversity_v9_vaccine <- ggarrange(richnessPlot_Day_V9_sub_region_Vaccine,diversityPlot_Day_V9_sub_region_Vaccine, ncol = 2, labels = c("D", "E"))
+
+alphadiversity_v9_vaccine <- annotate_figure(alphadiversity_v9_vaccine,
+               top = text_grob("Late Vaccination", face = "bold", size = 14))
+
+alphadiversity_v9_vaccine
+```
+
+### beta-adonis test for PCOA analysis in V2 stool samples
+```{r beta-adonis}
+# Subset group for beta-adonis
+
+ps1_V9_UG <- subset_samples(ps1_V9, sub_region == "UG")
+
+ps1_V9_RW <- subset_samples(ps1_V9, sub_region == "RW")
+
+ps1_V9_US <- subset_samples(ps1_V9, sub_region == "US")
+
+```
+
+```{r beta-adonis,V9 UG}
+set.seed(46395617)
+# Unifrac
+bdist_unf_UG <- phyloseq::distance(ps1_V9_UG, "unifrac")
+col_unf_UG <- as(sample_data(ps1_V9_UG), "data.frame")[, "vaccine_group"]
+adonis.bdist_unf_UG <- adonis(bdist_unf_UG ~ col_unf_UG)
+adonis.bdist_unf_UG
+
+# Weighted Unifrac
+bdist_wunf_UG <- phyloseq::distance(ps1_V9_UG, "wunifrac")
+col_wunf_UG <- as(sample_data(ps1_V9_UG), "data.frame")[, "vaccine_group"]
+adonis.bdist_wunf_UG <- adonis(bdist_wunf_UG ~ col_wunf_UG)
+adonis.bdist_wunf_UG
+```
+
+```{r beta-adonis,V9 RW}
+set.seed(46395617)
+# Unifrac
+bdist_unf_RW <- phyloseq::distance(ps1_V9_RW, "unifrac")
+col_unf_RW <- as(sample_data(ps1_V9_RW), "data.frame")[, "vaccine_group"]
+adonis.bdist_unf_RW <- adonis(bdist_unf_RW ~ col_unf_RW)
+adonis.bdist_unf_RW
+
+# Weighted Unifrac
+bdist_wunf_RW <- phyloseq::distance(ps1_V9_RW, "wunifrac")
+col_wunf_RW <- as(sample_data(ps1_V9_RW), "data.frame")[, "vaccine_group"]
+adonis.bdist_wunf_RW <- adonis(bdist_wunf_RW ~ col_wunf_RW)
+adonis.bdist_wunf_RW
+```
+
+```{r beta-adonis,V9 US}
+set.seed(46395617)
+# Unifrac
+bdist_unf_US <- phyloseq::distance(ps1_V9_US, "unifrac")
+col_unf_US <- as(sample_data(ps1_V9_US), "data.frame")[, "vaccine_group"]
+adonis.bdist_unf_US <- adonis(bdist_unf_US ~ col_unf_US)
+adonis.bdist_unf_US
+
+# Weighted Unifrac
+bdist_wunf_US <- phyloseq::distance(ps1_V9_US, "wunifrac")
+col_wunf_US <- as(sample_data(ps1_V9_US), "data.frame")[, "vaccine_group"]
+adonis.bdist_wunf_US <- adonis(bdist_wunf_US ~ col_wunf_US)
+adonis.bdist_wunf_US
+```
+
+```{r ordination}
+# Calculate ordinations
+# make the ordination plots separately
+
+ord.pcoa.uni_V9_UG <- ordinate(ps1_V9_UG, method = "PCoA", distance = "unifrac")
+evals.uni_V9_UG <- ord.pcoa.uni_V9_UG$values$Eigenvalues
+ord.pcoa.wuni_V9_UG <- ordinate(ps1_V9_UG, method = "PCoA", distance = "wunifrac")
+evals.wuni_V9_UG <- ord.pcoa.wuni_V9_UG$values$Eigenvalues
+
+ord.pcoa.uni_V9_RW <- ordinate(ps1_V9_RW, method = "PCoA", distance = "unifrac")
+evals.uni_V9_RW <- ord.pcoa.uni_V9_RW$values$Eigenvalues
+ord.pcoa.wuni_V9_RW <- ordinate(ps1_V9_RW, method = "PCoA", distance = "wunifrac")
+evals.wuni_V9_RW <- ord.pcoa.wuni_V9_RW$values$Eigenvalues
+
+ord.pcoa.uni_V9_US <- ordinate(ps1_V9_US, method = "PCoA", distance = "unifrac")
+evals.uni_V9_US <- ord.pcoa.uni_V9_US$values$Eigenvalues
+ord.pcoa.wuni_V9_US <- ordinate(ps1_V9_US, method = "PCoA", distance = "wunifrac")
+evals.wuni_V9_US <- ord.pcoa.wuni_V9_US$values$Eigenvalues
+```
+
+# make the ordination plots separately 
+```{r ordination-plots, Samples by vaccine or placebo group in V2}
+## Ordination plots all samples
+# Unifrac
+# make the ordination plots separately 
+
+# V9-RW UNWeighted Unifrac
+p.pcoa.uni.subregion_V9_RW_vaccine <- plot_ordination(ps1_V9_RW, ord.pcoa.uni_V9_RW, color = "vaccine_group", axes = c(1,2)) +
+  geom_point(size = 2) +
+  labs(title = " ", subtitle = "RW", color = "Vaccine Group") +
+  #stat_ellipse(type = "norm", linetype = 2) +
+  scale_color_manual(values=vaccinecolor)+
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="none",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold")) +
+  annotate("text", x=-0.3, y=0.15, label ="ADONIS\n p = 0.072", col = "black")
+
+p.pcoa.uni.subregion_V9_RW_vaccine 
+
+## V9-RW Weighted Unifrac
+p.pcoa.wuni.subregion_V9_RW_vaccine <- plot_ordination(ps1_V9_RW, ord.pcoa.wuni_V9_RW, color = "vaccine_group", axes = c(1,2)) +
+  geom_point(size = 2) +
+  labs(title = " ", subtitle = "RW", color = "Vaccine Group") +
+  scale_color_hue(labels = c("Placebo", "Vaccine"))+
+    #stat_ellipse(type = "norm", linetype = 2) +
+  scale_color_manual(values=vaccinecolor)+
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="none",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold")) +  
+  annotate("text", x=-0.3, y=0.15, label ="ADONIS\n p = 0.724", col = "black")  
+
+p.pcoa.wuni.subregion_V9_RW_vaccine
+
+# V9-UG UNWeighted Unifrac
+p.pcoa.uni.subregion_V9_UG_vaccine <- plot_ordination(ps1_V9_UG, ord.pcoa.uni_V9_UG, color = "vaccine_group", axes = c(1,2)) +
+  geom_point(size = 2) +
+  labs(title = " ", subtitle = "UG", color = "Vaccine Group") +
+  #stat_ellipse(type = "norm", linetype = 2) +
+  scale_color_manual(values=vaccinecolor)+
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="none",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold")) 
+
+p.pcoa.uni.subregion_V9_UG_vaccine 
+
+## V9-UG Weighted Unifrac
+p.pcoa.wuni.subregion_V9_UG_vaccine <- plot_ordination(ps1_V9_UG, ord.pcoa.wuni_V9_UG, color = "vaccine_group", axes = c(1,2)) +
+  geom_point(size = 2) +
+  labs(title = " ", subtitle = "UG", color = "Vaccine Group") +
+  scale_color_hue(labels = c("Placebo", "Vaccine"))+
+    #stat_ellipse(type = "norm", linetype = 2) +
+  scale_color_manual(values=vaccinecolor)+
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="bottom",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold")) 
+
+p.pcoa.wuni.subregion_V9_UG_vaccine
+
+p.pcoa.wuni.subregion_V9_UG_vaccineA <- p.pcoa.wuni.subregion_V9_UG_vaccine + theme(legend.position="none")
+
+# V9-US UNWeighted Unifrac
+p.pcoa.uni.subregion_V9_US_vaccine <- plot_ordination(ps1_V9_US, ord.pcoa.uni_V9_US, color = "vaccine_group", axes = c(1,2)) +
+  geom_point(size = 2) +
+  labs(title = " ", subtitle = "US", color = "Vaccine Group") +
+  #stat_ellipse(type = "norm", linetype = 2) +
+  scale_color_manual(values=vaccinecolor)+
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="none",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold")) +
+  annotate("text", x=-0.15, y=-0.2, label ="ADONIS\n p = 0.683", col = "black")
+
+p.pcoa.uni.subregion_V9_US_vaccine 
+
+## V9-US Weighted Unifrac
+p.pcoa.wuni.subregion_V9_US_vaccine <- plot_ordination(ps1_V9_US, ord.pcoa.wuni_V9_US, color = "vaccine_group", axes = c(1,2)) +
+  geom_point(size = 2) +
+  labs(title = " ", subtitle = "US",color = "Vaccine Group") +
+  scale_color_hue(labels = c("Placebo", "Vaccine"))+
+    #stat_ellipse(type = "norm", linetype = 2) +
+  scale_color_manual(values=vaccinecolor)+
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="none",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold")) + 
+  annotate("text", x=-0.15, y=-0.2, label ="ADONIS\n p = 0.695", col = "black")
+p.pcoa.wuni.subregion_V9_US_vaccine
+
+  # extract the legend from one of the plots
+legend <- get_legend(p.pcoa.wuni.subregion_V2_UG_vaccine)
+
+pcoa.uni_v9 <- ggarrange(p.pcoa.uni.subregion_V9_RW_vaccine, p.pcoa.uni.subregion_V9_UG_vaccine, p.pcoa.uni.subregion_V9_US_vaccine, align = c("v"), ncol=3)
+
+pcoa.uni_v9 <- annotate_figure(pcoa.uni_v9, fig.lab = "     Unweighted UniFrac Distances", fig.lab.size = 14)
+
+p.pcoa.wuni_v9 <- ggarrange(p.pcoa.wuni.subregion_V9_RW_vaccine, p.pcoa.wuni.subregion_V9_UG_vaccineA, p.pcoa.wuni.subregion_V9_US_vaccine, align = c("v"), ncol=3)
+
+p.pcoa.wuni_v9 <- annotate_figure(p.pcoa.wuni_v9, fig.lab = "     Weighted UniFrac Distances", fig.lab.size = 14) 
+                               
+vaccine.PCOA.V9 <- ggarrange(pcoa.uni_v9, pcoa.uni_v9,
+                    nrow = 2,align = c("h"), labels = c("F", ""))
+
+# "Unweighted UniFrac Distances "
+# 
+b_diversity_vaccine.v9 <- plot_grid(vaccine.PCOA.V9, legend,  rel_heights = c(1,.1), ncol = 1)
+
+b_diversity_vaccine.v9 
+```
+
+##Figure 4
+```{r, Fig 4,fig.width=8, fig.height=8}
+ 
+ggarrange(alphadiversity_v9_vaccine,                          # First row with scatter plot
+          b_diversity_vaccine.v9, # Second row with box and dot plots
+          nrow = 2, heights = c(1,2)
+          ) 
+```
+
+### Combine Figure 3
+
+```{r,  fig.width=16, fig.height=10}
+FIG3ABDE <- plot_grid(alphadiversity_v2_vaccine, NULL,alphadiversity_v9_vaccine, rel_widths = c(1,0.16,1.5), nrow = 1 , ncol = 3)
+
+FIG3CF <- plot_grid(b_diversity_vaccine.v2,NULL, b_diversity_vaccine.v9, rel_widths = c(1,0.05,1.35),  nrow = 1 , ncol = 3)
+
+##FIG3CF <- plot_grid(b_diversity_vaccine.v2, b_diversity_vaccine.v9, rel_widths = c(1,1.5), nrow = 1, align = 'vh')
+          
+plot_grid(FIG3ABDE, FIG3CF, ncol = 1, rel_heights =  c(0.65,1))
+
+```
+
+
+### alpha-diversity analysis between two individual collection from the same people
+```{r,fig.width=8, fig.height=4}
+
+# Diversity calculations
+diversity_M <- as_tibble(estimate_richness(ps1_M, measures = c("Observed", "Shannon")))
+# ignroe the warning message
+diversity_M
+
+# Bind sample data to diversity data
+sd_M <- as.tibble(sample_data(ps1_M)) # useful to coerce the phyloseq object into an R data frame
+# ignore the warning message
+ps1.rich_M <- as.tibble(cbind(sd_M, diversity_M)) # merge sd by row names
+ps1.rich_M <- ps1.rich_M %>% group_by(visit_description) %>% mutate(group2 = 1:n())
+ps1.rich_M
+
+#saveRDS(ps1.rich_M,"./ps1.rich_M.RDS")
+#write.csv(ps1.rich_M,"./ps1.rich_M.csv")
+matchcolor <- c("V2 STOOL COLLECTION" ="#00A087B2", "V9 STOOL COLLECTION" = "#F39B7FB2")
+
+richness_M <- ggpaired(data = ps1.rich_M, x = "visit_description", y = "Observed",id = "group2", color = "visit_description", point.size = 1.6,line.color = "gray", line.size = 0.4, palette = "jco", facet.by = "sub_region")+
+  stat_compare_means(comparisons = list(c("V2 STOOL COLLECTION", "V9 STOOL COLLECTION")), label = "p.signif", paired = TRUE, label.y = 430) +
+  ylab("Bacterial Richness") +
+  xlab(" ") +
+  #ggtitle("Richness") +
+  scale_color_manual(values=matchcolor)+
+  scale_x_discrete(labels=c("V2 STOOL COLLECTION" = "Early", "V9 STOOL COLLECTION" = "Late")) +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")
+
+Shannon_M <- ggpaired(data = ps1.rich_M, x = "visit_description", y = "Shannon",id = "group2",
+         color = "visit_description", point.size = 1.6,line.color = "gray", line.size = 0.4, palette = "jco",facet.by = "sub_region")+
+  stat_compare_means(comparisons = list(c("V2 STOOL COLLECTION", "V9 STOOL COLLECTION")), label = "p.signif", paired = TRUE, label.y = 4.8) +
+  ylab("Bacterial Shannon Diversity") +
+  xlab(" ") +
+  #ggtitle("Shannon Diversity") +
+  scale_color_manual(values=matchcolor)+
+  scale_x_discrete(labels=c("V2 STOOL COLLECTION" = "Early", "V9 STOOL COLLECTION" = "Late")) +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")
+
+alphadiversity_M <- ggarrange(richness_M, Shannon_M, ncol = 2, labels = c("A", "B"))
+alphadiversity_M
+```
+
+
+### beta-adonis test for PCOA analysis between two individual collection from the same people
+```{r beta-adonis}
+# Subset group for beta-adonis
+
+ps1_M_UG <- subset_samples(ps1_M, sub_region == "UG")
+
+
+ps1_M_US <- subset_samples(ps1_M, sub_region == "US")
+
+```
+
+```{r ordination}
+# Calculate ordinations
+# make the ordination plots separately
+
+ord.pcoa.uni_M_UG <- ordinate(ps1_M_UG, method = "PCoA", distance = "unifrac")
+evals.uni_M_UG <- ord.pcoa.uni_M_UG$values$Eigenvalues
+ord.pcoa.wuni_M_UG <- ordinate(ps1_M_UG, method = "PCoA", distance = "wunifrac")
+evals.wuni_M_UG <- ord.pcoa.wuni_M_UG$values$Eigenvalues
+
+
+ord.pcoa.uni_M_US <- ordinate(ps1_M_US, method = "PCoA", distance = "unifrac")
+evals.uni_M_US <- ord.pcoa.uni_M_US$values$Eigenvalues
+ord.pcoa.wuni_M_US <- ordinate(ps1_M_US, method = "PCoA", distance = "wunifrac")
+evals.wuni_M_US <- ord.pcoa.wuni_M_US$values$Eigenvalues
+```
+
+```{r beta-adonis,M UG}
+set.seed(46395617)
+# Unifrac
+bdist_unf_UG <- phyloseq::distance(ps1_M_UG, "unifrac")
+col_unf_UG <- as(sample_data(ps1_M_UG), "data.frame")[, "visit_description"]
+adonis.bdist_unf_UG <- adonis(bdist_unf_UG ~ col_unf_UG)
+adonis.bdist_unf_UG
+
+# Weighted Unifrac
+bdist_wunf_UG <- phyloseq::distance(ps1_M_UG, "wunifrac")
+col_wunf_UG <- as(sample_data(ps1_M_UG), "data.frame")[, "visit_description"]
+adonis.bdist_wunf_UG <- adonis(bdist_wunf_UG ~ col_wunf_UG)
+adonis.bdist_wunf_UG
+```
+
+```{r beta-adonis,M US UG}
+set.seed(46395617)
+# Unifrac
+bdist_unf_US <- phyloseq::distance(ps1_M_US, "unifrac")
+col_unf_US <- as(sample_data(ps1_M_US), "data.frame")[, "visit_description"]
+adonis.bdist_unf_US <- adonis(bdist_unf_US ~ col_unf_US)
+adonis.bdist_unf_US
+
+# Weighted Unifrac
+bdist_wunf_US <- phyloseq::distance(ps1_M_US, "wunifrac")
+col_wunf_US <- as(sample_data(ps1_M_US), "data.frame")[, "visit_description"]
+adonis.bdist_wunf_US <- adonis(bdist_wunf_US ~ col_wunf_US)
+adonis.bdist_wunf_US
+
+
+```
+
+### PCOA analysis between two individual collection from the same people
+```{r ordination-plots, Samples by vaccine or placebo group in V2}
+## Ordination plots all samples
+# Unifrac
+# make the ordination plots separately 
+
+# M-UG UNWeighted Unifrac
+p.pcoa.uni.subregion_M_UG_vaccine <- plot_ordination(ps1_M_UG, ord.pcoa.uni_M_UG, color = "visit_description", axes = c(1,2)) + 
+  scale_color_jco()+
+  geom_point(size = 2) +
+  labs(title = "Unweighted UniFrac Distances", subtitle = "UG", color = "Visit description") +
+  stat_ellipse(type = "norm", linetype = 2) +
+  scale_color_manual(values=matchcolor)+
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="none",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold"))+
+  annotate("text", x=0.45, y=-0.25, label ="ADONIS\n p = 0.815", col = "black")
+
+p.pcoa.uni.subregion_M_UG_vaccine 
+
+## M-UG Weighted Unifrac
+p.pcoa.wuni.subregion_M_UG_vaccine <- plot_ordination(ps1_M_UG, ord.pcoa.wuni_M_UG, color = "visit_description", axes = c(1,2)) +
+  scale_color_jco()+
+  geom_point(size = 2) +
+  labs(title = "Weighted UniFrac Distances", subtitle = "UG", color = "Visit description") +
+  stat_ellipse(type = "norm", linetype = 2) +
+  scale_color_manual(values=matchcolor)+
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="bottom",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold"))+
+  annotate("text", x=0.4, y=-0.15, label ="ADONIS\n p = 0.447", col = "black")
+
+p.pcoa.wuni.subregion_M_UG_vaccine
+
+p.pcoa.wuni.subregion_M_UG_vaccineA <- p.pcoa.wuni.subregion_M_UG_vaccine + theme(legend.position="none")
+
+# M-US UNWeighted Unifrac
+p.pcoa.uni.subregion_M_US_vaccine <- plot_ordination(ps1_M_US, ord.pcoa.uni_M_US, color = "visit_description", axes = c(1,2)) +
+  scale_color_jco()+
+  geom_point(size = 2) +
+  labs(title = " ", subtitle = "US", color = "Vaccine Group") +
+  stat_ellipse(type = "norm", linetype = 2) +
+  scale_color_manual(values=matchcolor)+
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="none",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold")) +
+  annotate("text", x=0.35, y=-0.2, label ="ADONIS\n p = 1", col = "black")
+
+p.pcoa.uni.subregion_M_US_vaccine 
+
+## M-US Weighted Unifrac
+p.pcoa.wuni.subregion_M_US_vaccine <- plot_ordination(ps1_M_US, ord.pcoa.wuni_M_US, color = "visit_description", axes = c(1,2)) +
+  scale_color_jco()+
+  geom_point(size = 2) +
+  labs(title = " ", subtitle = "US",color = "Vaccine Group") +
+  stat_ellipse(type = "norm", linetype = 2) +
+  scale_color_manual(values=matchcolor)+
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="none",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold")) + 
+  annotate("text", x=0.23, y=-0.1, label ="ADONIS\n p = 0.994", col = "black")
+p.pcoa.wuni.subregion_M_US_vaccine
+
+  # extract the legend from one of the plots
+legend <- get_legend(p.pcoa.wuni.subregion_M_UG_vaccine)
+
+pcoa.uni_M <- ggarrange(
+              ggarrange(p.pcoa.uni.subregion_M_UG_vaccine,
+                        p.pcoa.wuni.subregion_M_UG_vaccineA,
+                        ncol=1),
+              ggarrange(p.pcoa.uni.subregion_M_US_vaccine,
+                        p.pcoa.wuni.subregion_M_US_vaccine,
+                        ncol=1),
+              align = c("h"), ncol=2, labels = c("C", ""))
+
+b_diversity_vaccine.M <- plot_grid(pcoa.uni_M, legend,  rel_heights = c(1,.1), ncol = 1)
+
+b_diversity_vaccine.M 
+```
+
+##Figure 5
+```{r, Fig 5,fig.width=8, fig.height=10}
+ 
+
+ggarrange(alphadiversity_M,                          # First row with scatter plot
+          b_diversity_vaccine.M, # Second row with box and dot plots
+          nrow = 2, heights = c(1,2))
+```
+
+
+
+
+
+
+
+### alpha-diversity analysis between different groups from V2 stool samples
+```{r alpha-diversity-group,V2,UG US, fig.width=11, fig.height=5}
+
+res.kruskal_richness_Day_V2_sub_region <- ps1.rich_V2 %>% group_by(sub_region) %>% kruskal_test(Observed ~ group)
+res.kruskal_richness_Day_V2_sub_region
+
+pwc_richness_Day_V2_sub_region <- ps1.rich_V2  %>% group_by(sub_region) %>%
+  dunn_test(Observed ~ group, p.adjust.method = "BH") 
+
+pwc_richness_Day_V2_sub_region  <- pwc_richness_Day_V2_sub_region %>% add_xy_position(x = "group")
+pwc_richness_Day_V2_sub_region
+
+res.kruskal_Shannon_Day_V2_sub_region <- ps1.rich_V2 %>% group_by(sub_region) %>% kruskal_test(Shannon~ group)
+res.kruskal_Shannon_Day_V2_sub_region
+
+pwc_Shannon_Day_V2_sub_region <- ps1.rich_V2 %>% group_by(sub_region) %>%
+  dunn_test(Shannon ~ group, p.adjust.method = "BH") 
+
+pwc_Shannon_Day_V2_sub_region <- pwc_Shannon_Day_V2_sub_region %>% add_xy_position(x = "group")
+
+pwc_Shannon_Day_V2_sub_region 
+
+
+# Make a boxplot of samples' richness and diversity, grouped by Site
+
+richnessPlot_Day_V2_sub_region <- ggplot(ps1.rich_V2 ,
+                       aes(x = group, y = Observed)) +
+  #geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = group), alpha = 0.65,
+                position = position_jitter(width = 0.3)) +
+  geom_boxplot(aes(color = group), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Bacterial Richness") +
+  xlab(" ") +
+  #ggtitle("Richness (V2)") +
+  theme_pubr() +
+  facet_wrap(~sub_region) +
+  #scale_x_discrete(labels=c("GROUP 1" = "Ad26/Ad26 + HD-gp140", 
+   #                         "GROUP 2" = "Ad26/Ad26 + LD-gp140",
+    #                        "GROUP 3" = "Ad26/Ad26",
+     #                       "GROUP 4" = "Ad26/MVA + HD-gp140",
+      #                      "GROUP 5" = "Ad26/MVA + LD-gp140",
+        #                    "GROUP 6" = "Ad26/MVA",
+         #                   "GROUP 7" = "Ad26/HD-gp140",
+           #                 "GROUP 8" = "Placebo")) +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  stat_pvalue_manual(pwc_richness_Day_V2_sub_region, hide.ns = TRUE)+
+  labs(
+    #subtitle = get_test_label(res.kruskal_richness_Day_V2_sub_region, detailed = TRUE),
+    #caption = get_pwc_label(pwc_richness_Day_V2_sub_region)
+    )
+  
+  
+diversityPlot_Day_V2_sub_region <- ggplot(ps1.rich_V2,
+                        aes(x = group, y = Shannon)) +
+                        geom_jitter(aes(color = group), alpha = 0.65,cposition = position_jitter(width = 0.3)) +
+                        geom_boxplot(aes(color = group), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Bacterial\nShannon Diversity") +
+  xlab(" ") +
+  #ggtitle("Shannon Diversity (V2)") +
+  theme_pubr() +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  theme(plot.subtitle = element_text(size = 10))  +
+  stat_pvalue_manual(pwc_Shannon_Day_V2_sub_region, hide.ns = TRUE)+
+  labs(
+    #subtitle = get_test_label(res.kruskal_Shannon_Day_V2_sub_region, detailed = TRUE),
+    #caption = get_pwc_label(pwc_Shannon_Day_V2_sub_region)
+    )+
+  facet_wrap(~sub_region)
+  #scale_x_discrete(labels=c("GROUP 1" = "Ad26/Ad26 + HD-gp140", 
+    #                        "GROUP 2" = "Ad26/Ad26 + LD-gp140",
+    #                        "GROUP 3" = "Ad26/Ad26",
+    #                        "GROUP 4" = "Ad26/MVA + HD-gp140",
+    #                        "GROUP 5" = "Ad26/MVA + LD-gp140",
+    #                        "GROUP 6" = "Ad26/MVA",
+    #                        "GROUP 7" = "Ad26/HD-gp140",
+    #                        "GROUP 8" = "Placebo")) 
+
+richnessPlot_Day_V2_sub_region
+diversityPlot_Day_V2_sub_region
+
+```
+
+### Combine for Figure 4
+```{r,fig.width=8, fig.height=12}
+Fig4AB <- plot_grid(richnessPlot_Day_V2_sub_region, diversityPlot_Day_V2_sub_region, ncol = 1, labels = "AUTO", align = 'vh')
+          
+Fig4AB <- annotate_figure(Fig4AB,top = text_grob("Early Vaccination", face = "bold", size = 14))       
+Fig4AB  
+
+Fig4CD <- plot_grid(richnessPlot_Day_V9_sub_region,diversityPlot_Day_V9_sub_region, ncol = 1, labels = c("C", "D"), align = 'vh')
+Fig4CD <- annotate_figure(Fig4CD,top = text_grob("Late Vaccination", face = "bold", size = 14))       
+Fig4CD 
+
+plot_grid(Fig4AB , Fig4CD, ncol = 1,  align = 'vh')
+```
+
+
+
+
+### alpha-diversity analysis between different region from V2 stool samples
+```{r alpha-diversity, V2-sub_region, fig.width=8, fig.height=6}
+
+subregion_richness_V2 <- ggboxplot(ps1.rich_V2, x = "sub_region", y = "Observed",color = "group", outlier.shape = NA, legend = "none", add = "jitter")+ 
+  stat_compare_means(method = "t.test", label = "p.format", vjust = 1, hjust =0.05) +
+  facet_wrap(~group, ncol = 8) +
+  labs(y="Bacterial Richness") +
+  theme(axis.title.x = element_blank()) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+subregion_richness_V2
+
+subregion_Shannon_V2 <- ggboxplot(ps1.rich_V2, x = "sub_region", y = "Shannon",color = "group", outlier.shape = NA, legend = "none", add = "jitter")+ 
+  stat_compare_means(method = "t.test", label = "p.format", vjust = 1, hjust =0.05) +
+  facet_wrap(~group, ncol = 8) +
+  labs(y="Bacterial Shannon") +
+  theme(axis.title.x = element_blank()) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+subregion_Shannon_V2
+```
+
+```{r alpha-diversity, V2-sub_region, fig.width=8, fig.height=12}
+plot_grid(richnessPlot_Day_V2_sub_region,diversityPlot_Day_V2_sub_region,         ggarrange(subregion_richness_V2,subregion_Shannon_V2, nrow = 2, labels = c("C", "D")), nrow = 3,labels = c("A", "B","" ),  rel_heights = c(1,1,1.6))
+
+```
+
+### alpha-diversity analysis between different groups from V9 stool samples
+```{r alpha-diversity-group,v9,RW UG, fig.width=8, fig.height=5}
+
+res.kruskal_richness_Day_V9_sub_region <- ps1.rich_V9 %>% group_by(sub_region) %>% kruskal_test(Observed ~ group)
+res.kruskal_richness_Day_V9_sub_region
+
+pwc_richness_Day_V9_sub_region <- ps1.rich_V9  %>% group_by(sub_region) %>%
+  dunn_test(Observed ~ group, p.adjust.method = "BH") 
+
+pwc_richness_Day_V9_sub_region  <- pwc_richness_Day_V9_sub_region %>% add_xy_position(x = "group")
+pwc_richness_Day_V9_sub_region
+
+res.kruskal_Shannon_Day_V9_sub_region <- ps1.rich_V9 %>% group_by(sub_region) %>% kruskal_test(Shannon~ group)
+res.kruskal_Shannon_Day_V9_sub_region
+
+pwc_Shannon_Day_V9_sub_region <- ps1.rich_V9 %>% group_by(sub_region) %>%
+  dunn_test(Shannon ~ group, p.adjust.method = "BH") 
+
+pwc_Shannon_Day_V9_sub_region <- pwc_Shannon_Day_V9_sub_region %>% add_xy_position(x = "group")
+
+pwc_Shannon_Day_V9_sub_region 
+
+
+# Make a boxplot of samples' richness and diversity, grouped by Site
+
+richnessPlot_Day_V9_sub_region <- ggplot(ps1.rich_V9 ,
+                       aes(x = group, y = Observed)) +
+  #geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color = group), alpha = 0.65,
+                position = position_jitter(width = 0.3)) +
+  geom_boxplot(aes(color = group), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Bacterial Richness") +
+  xlab(" ") +
+  #ggtitle("Richness (V9)") +
+  theme_pubr() +
+  #scale_x_discrete(labels=c("GROUP 1" = "Ad26/Ad26 + HD-gp140", 
+      #                      "GROUP 2" = "Ad26/Ad26 + LD-gp140",
+       #                     "GROUP 3" = "Ad26/Ad26",
+        #                    "GROUP 4" = "Ad26/MVA + HD-gp140",
+         #                   "GROUP 5" = "Ad26/MVA + LD-gp140",
+        #                    "GROUP 6" = "Ad26/MVA",
+       #                     "GROUP 7" = "Ad26/HD-gp140",
+      #                      "GROUP 8" = "Placebo")) +
+  facet_wrap(~sub_region) +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  stat_pvalue_manual(pwc_richness_Day_V9_sub_region, hide.ns = TRUE)+
+  labs(
+    #subtitle = get_test_label(res.kruskal_richness_Day_V9_sub_region, detailed = TRUE),
+    caption = get_pwc_label(pwc_richness_Day_V9_sub_region)
+    )
+  
+  
+diversityPlot_Day_V9_sub_region <- ggplot(ps1.rich_V9,
+                        aes(x = group, y = Shannon)) +
+                        geom_jitter(aes(color = group), alpha = 0.65,cposition = position_jitter(width = 0.3)) +
+                        geom_boxplot(aes(color = group), fill = "gray80", alpha = 0.25, width = 0.4)+
+  ylab("Bacterial\nShannon Diversity") +
+  xlab(" ") +
+  #ggtitle("Shannon Diversity (V9)") +
+  theme_pubr() +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  stat_pvalue_manual(pwc_Shannon_Day_V9_sub_region, hide.ns = TRUE)+
+  labs(
+    #subtitle = get_test_label(res.kruskal_Shannon_Day_V9_sub_region, detailed = TRUE),
+    caption = get_pwc_label(pwc_Shannon_Day_V9_sub_region)
+    )+
+  #scale_x_discrete(labels=c("GROUP 1" = "Ad26/Ad26 + HD-gp140", 
+      #                      "GROUP 2" = "Ad26/Ad26 + LD-gp140",
+        #                    "GROUP 3" = "Ad26/Ad26",
+         #                   "GROUP 4" = "Ad26/MVA + HD-gp140",
+          #                  "GROUP 5" = "Ad26/MVA + LD-gp140",
+         #                   "GROUP 6" = "Ad26/MVA",
+        #                    "GROUP 7" = "Ad26/HD-gp140",
+       #                     "GROUP 8" = "Placebo")) +
+  facet_wrap(~sub_region) 
+
+richnessPlot_Day_V9_sub_region
+diversityPlot_Day_V9_sub_region
+
+```
+
+### alpha-diversity analysis between different region from V2 stool samples
+```{r alpha-diversity, V9-sub_region, fig.width=16, fig.height=6}
+
+res.kruskal_richness_Day_V9_sub_group <- ps1.rich_V9 %>% group_by(group) %>% kruskal_test(Observed ~ sub_region)
+res.kruskal_richness_Day_V9_sub_group
+
+pwc_richness_Day_V9_sub_group<- ps1.rich_V9  %>% group_by(group) %>%
+  dunn_test(Observed ~ sub_region, p.adjust.method = "BH") 
+
+pwc_richness_Day_V9_sub_group <- pwc_richness_Day_V9_sub_group %>% add_xy_position(x = "sub_region")
+pwc_richness_Day_V9_sub_group
+
+res.kruskal_Shannon_Day_V9_sub_group <- ps1.rich_V9 %>% group_by(group) %>% kruskal_test(Shannon ~ sub_region)
+res.kruskal_Shannon_Day_V9_sub_group
+
+pwc_Shannon_Day_V9_sub_group <- ps1.rich_V9 %>% group_by(group) %>%
+  dunn_test(Shannon ~ sub_region, p.adjust.method = "BH") 
+
+pwc_Shannon_Day_V9_sub_group <- pwc_Shannon_Day_V9_sub_group %>% add_xy_position(x = "sub_region")
+
+pwc_Shannon_Day_V9_sub_group
+
+# Make a boxplot of samples' richness and diversity, grouped by group
+subregion_richness_V9 <- ggboxplot(ps1.rich_V9, x = "sub_region", y = "Observed",color = "group", outlier.shape = NA, legend = "none", add = "jitter")+
+  facet_wrap(~group, ncol = 8) +
+  labs(y="Observed") +
+  theme(axis.title.x = element_blank()) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  stat_pvalue_manual(pwc_richness_Day_V9_sub_group, hide.ns = TRUE)+
+  labs(
+    #subtitle = get_test_label(res.kruskal_richness_Day_V9_sub_group, detailed = TRUE),
+    caption = get_pwc_label(pwc_richness_Day_V9_sub_group)
+    )
+subregion_richness_V9
+
+subregion_Shannon_V9 <- ggboxplot(ps1.rich_V9, x = "sub_region", y = "Shannon",color = "group", outlier.shape = NA, legend = "none", add = "jitter")+ 
+  facet_wrap(~group, ncol = 8) +
+  labs(y="Shannon") +
+  theme(axis.title.x = element_blank()) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  stat_pvalue_manual(pwc_Shannon_Day_V9_sub_group, hide.ns = TRUE)+
+  labs(
+    #subtitle = get_test_label(res.kruskal_Shannon_Day_V9_sub_group, detailed = TRUE),
+    caption = get_pwc_label(pwc_Shannon_Day_V9_sub_group)
+    )
+subregion_Shannon_V9
+```
+
+
+```{r alpha-diversity, V9-sub_region, fig.width=8, fig.height=12}
+plot_grid(richnessPlot_Day_V9_sub_region,diversityPlot_Day_V9_sub_region,         plot_grid(subregion_richness_V9,subregion_Shannon_V9, nrow = 2, labels = c("C", "D")), nrow = 3,labels = c("A", "B","" ),  rel_heights = c(1,1,1.6))
+
+```
+
+
+
+### PCOA analysis in V2 stool samples
+```{r ordination-plots, All samples in V2, fig.width=16, fig.height=4}
+## Ordination plots all samples
+# Unifrac
+p.pcoa.uni.region_V2_response <- plot_ordination(ps1_V2, ord.pcoa.uni_V2, color = "sub_region", shape = "responses_group" , axes = c(1,2)) +
+  geom_point(size = 3) + 
+  labs(title = "Unweighted UniFrac Distances", color = "Geographic Region") +
+  #stat_ellipse(type = "norm", linetype = 2) + 
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  coord_fixed(sqrt(evals.uni_V2[2] / evals.uni_V2[1]))+
+  theme(legend.position="none")
+  #annotate("text", x=0.3, y=-0.23, label ="ADONIS\np = 0.001", col = "black")
+p.pcoa.uni.region_V2_response
+
+# Weighted Unifrac
+p.pcoa.wuni.region_V2_response <- plot_ordination(ps1_V2, ord.pcoa.wuni_V2, color = "sub_region", shape = "responses_group",  axes = c(1,2)) +
+  geom_point(size = 3) + 
+  labs(title = "Weighted UniFrac Distances", shape = "Immune response Score", color = "Geographic Region") +
+  #stat_ellipse(type = "norm", linetype = 2) + 
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  coord_fixed(sqrt(evals.wuni_V2[2] / evals.wuni_V2[1]))
+  #annotate("text", x=0.5, y=-0.15, label ="ADONIS\np = 0.003", col = "black")
+p.pcoa.wuni.region_V2_response
+
+p.pcoa.wuni.region_V2A_response <- p.pcoa.wuni.region_V2_response + theme(legend.position="none")
+
+  # extract the legend from one of the plots
+legend <- get_legend(p.pcoa.wuni.region_V2_response)
+
+PCOA.V2_response <- plot_grid(p.pcoa.uni.region_V2_response,p.pcoa.wuni.region_V2A_response, align = 'vh')
+
+b_diversity_v2_response <- plot_grid(PCOA.V2_response, legend, labels = c("D", ""), rel_widths = c(1,.1), nrow = 1)
+
+b_diversity_v2_response 
+#aes(size = responses_group, alpha = responses_group)
+```
+
+### PCOA analysis in V9 stool samples
+```{r ordination-plots, All samples in V9, fig.width=16, fig.height=4}
+## Ordination plots all samples
+regioncolor <- c("UG" ="#F8766D", "RW" = "#00BA42", "US" = "#00BFC4")
+
+# Unifrac
+p.pcoa.uni.region_V9_response <- plot_ordination(ps1_V9, ord.pcoa.uni_V9, color = "sub_region", shape = "responses_group" , label = "responses_group", axes = c(1,2)) +
+    scale_color_manual(values=regioncolor)+
+  geom_point(size = 3) +
+  labs(title = "Unweighted UniFrac Distances", color = "Geographic Region") +
+  #stat_ellipse(type = "norm", linetype = 2) + 
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="none")+
+  coord_fixed(sqrt(evals.uni_V9[2] / evals.uni_V9[1]))
+  #annotate("text", x=0.35, y=-0.2, label ="ADONIS\nRW - UG p = 0.002\nRW - US p = 0.001\nUG - US p = 0.001", col = "black")
+p.pcoa.uni.region_V9_response 
+
+# Weighted Unifrac
+p.pcoa.wuni.region_V9_response <- plot_ordination(ps1_V9, ord.pcoa.wuni_V9, color = "sub_region", shape = "responses_group" , label = "responses_group", axes = c(1,2)) +
+    scale_color_manual(values=regioncolor)+
+  geom_point(size = 3) +
+  labs(title = "Weighted UniFrac Distances ", shape = "Immune response Score", color = "Geographic Region") +
+  #stat_ellipse(type = "norm", linetype = 2) + 
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  coord_fixed(sqrt(evals.wuni_V9[2] / evals.wuni_V9[1]))
+  #annotate("text", x=0.4, y=-0.2, label ="ADONIS\nRW - UG p = 0.003\nRW - US p = 0.001\nUG - US p = 0.001", col = "black")
+p.pcoa.wuni.region_V9_response 
+
+p.pcoa.wuni.region_V9A_response  <- p.pcoa.wuni.region_V9_response  + theme(legend.position="none")
+
+  # extract the legend from one of the plots
+legend <- get_legend(p.pcoa.wuni.region_V9_response )
+
+PCOA.V9_response  <- plot_grid(p.pcoa.uni.region_V9_response , p.pcoa.wuni.region_V9A_response , align = 'vh')
+
+b_diversity_v9_response  <- plot_grid(PCOA.V9_response, legend, labels = c("E", ""), rel_widths = c(1,.1), nrow = 1)
+
+b_diversity_v9_response  
+
+```
+
+
+```{r}
+physeqMerged_Day_V2
+physeqMerged_Day_V2_vaccineonly<-subset_samples(physeqMerged_Day_V2, responses_group != "NA")
+physeqMerged_Day_V2_vaccineonly
+
+ps1_V2_vaccineonly <- physeqMerged_Day_V2_vaccineonly %>%
+  subset_taxa(
+    Family  != "mitochondria" &
+    Class   != "Chloroplast" &
+    Phylum != "Cyanobacteria/Chloroplast"
+  )
+ps1_V2_vaccineonly
+
+
+```
+```{r}
+physeqMerged_Day_V9
+physeqMerged_Day_V9_vaccineonly<-subset_samples(physeqMerged_Day_V9, responses_group != "NA")
+physeqMerged_Day_V9_vaccineonly
+
+ps1_V9_vaccineonly <- physeqMerged_Day_V9_vaccineonly %>%
+  subset_taxa(
+    Family  != "mitochondria" &
+    Class   != "Chloroplast" &
+    Phylum != "Cyanobacteria/Chloroplast"
+  )
+ps1_V9_vaccineonly
+
+```
+
+```{r}
+# Subset group for beta-adonis
+
+ps1_V2_vaccineonly_UG <- subset_samples(ps1_V2_vaccineonly, sub_region == "UG")
+
+ps1_V2_vaccineonly_US <- subset_samples(ps1_V2_vaccineonly, sub_region == "US")
+
+ps1_V9_vaccineonly_UG <- subset_samples(ps1_V9_vaccineonly, sub_region == "UG")
+
+ps1_V9_vaccineonly_US <- subset_samples(ps1_V9_vaccineonly, sub_region == "US")
+
+ps1_V9_vaccineonly_RW <- subset_samples(ps1_V9_vaccineonly, sub_region == "RW")
+```
+
+```{r beta-adonis,V2_vaccineonly UG}
+set.seed(46395617)
+# Unifrac
+bdist_unf_UG_vaccineonly <- phyloseq::distance(ps1_V2_vaccineonly_UG, "unifrac")
+col_unf_UG_vaccineonly <- as(sample_data(ps1_V2_vaccineonly_UG), "data.frame")[, "responses_group"]
+adonis.bdist_unf_UG_vaccineonly <- adonis(bdist_unf_UG_vaccineonly ~ col_unf_UG_vaccineonly)
+adonis.bdist_unf_UG_vaccineonly
+
+# Weighted Unifrac
+bdist_wunf_UG_vaccineonly <- phyloseq::distance(ps1_V2_vaccineonly_UG, "wunifrac")
+col_wunf_UG_vaccineonly <- as(sample_data(ps1_V2_vaccineonly_UG), "data.frame")[, "responses_group"]
+adonis.bdist_wunf_UG_vaccineonly <- adonis(bdist_wunf_UG_vaccineonly ~ col_wunf_UG_vaccineonly)
+adonis.bdist_wunf_UG_vaccineonly
+```
+
+```{r beta-adonis,V2_vaccineonly US}
+set.seed(46395617)
+# Unifrac
+bdist_unf_US_vaccineonly <- phyloseq::distance(ps1_V2_vaccineonly_US, "unifrac")
+col_unf_US_vaccineonly <- as(sample_data(ps1_V2_vaccineonly_US), "data.frame")[, "responses_group"]
+adonis.bdist_unf_US_vaccineonly <- adonis(bdist_unf_US_vaccineonly ~ col_unf_US_vaccineonly)
+adonis.bdist_unf_US_vaccineonly
+
+# Weighted Unifrac
+bdist_wunf_US_vaccineonly <- phyloseq::distance(ps1_V2_vaccineonly_US, "wunifrac")
+col_wunf_US_vaccineonly <- as(sample_data(ps1_V2_vaccineonly_US), "data.frame")[, "responses_group"]
+adonis.bdist_wunf_US_vaccineonly <- adonis(bdist_wunf_US_vaccineonly ~ col_wunf_US_vaccineonly)
+adonis.bdist_wunf_US_vaccineonly
+```
+```{r beta-adonis,V9_vaccineonly RW}
+set.seed(46395617)
+# Unifrac
+bdist_unf_RW_vaccineonly <- phyloseq::distance(ps1_V9_vaccineonly_RW, "unifrac")
+col_unf_RW_vaccineonly <- as(sample_data(ps1_V9_vaccineonly_RW), "data.frame")[, "responses_group"]
+adonis.bdist_unf_RW_vaccineonly <- adonis(bdist_unf_RW_vaccineonly ~ col_unf_RW_vaccineonly)
+adonis.bdist_unf_RW_vaccineonly
+
+# Weighted Unifrac
+bdist_wunf_RW_vaccineonly <- phyloseq::distance(ps1_V9_vaccineonly_RW, "wunifrac")
+col_wunf_RW_vaccineonly <- as(sample_data(ps1_V9_vaccineonly_RW), "data.frame")[, "responses_group"]
+adonis.bdist_wunf_RW_vaccineonly <- adonis(bdist_wunf_RW_vaccineonly ~ col_wunf_RW_vaccineonly)
+adonis.bdist_wunf_RW_vaccineonly
+```
+
+```{r beta-adonis,V9_vaccineonly UG}
+set.seed(46395617)
+# Unifrac
+bdist_unf_UG_vaccineonly <- phyloseq::distance(ps1_V9_vaccineonly_UG, "unifrac")
+col_unf_UG_vaccineonly <- as(sample_data(ps1_V9_vaccineonly_UG), "data.frame")[, "responses_group"]
+adonis.bdist_unf_UG_vaccineonly <- adonis(bdist_unf_UG_vaccineonly ~ col_unf_UG_vaccineonly)
+adonis.bdist_unf_UG_vaccineonly
+
+# Weighted Unifrac
+bdist_wunf_UG_vaccineonly <- phyloseq::distance(ps1_V9_vaccineonly_UG, "wunifrac")
+col_wunf_UG_vaccineonly <- as(sample_data(ps1_V9_vaccineonly_UG), "data.frame")[, "responses_group"]
+adonis.bdist_wunf_UG_vaccineonly <- adonis(bdist_wunf_UG_vaccineonly ~ col_wunf_UG_vaccineonly)
+adonis.bdist_wunf_UG_vaccineonly
+```
+
+```{r beta-adonis,V9_vaccineonly US}
+set.seed(46395617)
+# Unifrac
+bdist_unf_US_vaccineonly <- phyloseq::distance(ps1_V9_vaccineonly_US, "unifrac")
+col_unf_US_vaccineonly <- as(sample_data(ps1_V9_vaccineonly_US), "data.frame")[, "responses_group"]
+adonis.bdist_unf_US_vaccineonly <- adonis(bdist_unf_US_vaccineonly ~ col_unf_US_vaccineonly)
+adonis.bdist_unf_US_vaccineonly
+
+# Weighted Unifrac
+bdist_wunf_US_vaccineonly <- phyloseq::distance(ps1_V9_vaccineonly_US, "wunifrac")
+col_wunf_US_vaccineonly <- as(sample_data(ps1_V9_vaccineonly_US), "data.frame")[, "responses_group"]
+adonis.bdist_wunf_US_vaccineonly <- adonis(bdist_wunf_US_vaccineonly ~ col_wunf_US_vaccineonly)
+adonis.bdist_wunf_US_vaccineonly
+```
+
+```{r}
+# Calculate ordinations
+#UG-v2
+ord.pcoa.uni_V2_vaccineonly_UG <- ordinate(ps1_V2_vaccineonly_UG, method = "PCoA", distance = "unifrac")
+evals.uni_V2_vaccineonly_UG <- ord.pcoa.uni_V2_vaccineonly_UG$values$Eigenvalues
+
+ord.pcoa.wuni_V2_vaccineonly_UG <- ordinate(ps1_V2_vaccineonly_UG, method = "PCoA", distance = "wunifrac")
+evals.wuni_V2_vaccineonly_UG <- ord.pcoa.wuni_V2_vaccineonly_UG$values$Eigenvalues
+
+#US-v2
+ord.pcoa.uni_V2_vaccineonly_US <- ordinate(ps1_V2_vaccineonly_US, method = "PCoA", distance = "unifrac")
+evals.uni_V2_vaccineonly_US <- ord.pcoa.uni_V2_vaccineonly_US$values$Eigenvalues
+
+ord.pcoa.wuni_V2_vaccineonly_US <- ordinate(ps1_V2_vaccineonly_US, method = "PCoA", distance = "wunifrac")
+evals.wuni_V2_vaccineonly_US <- ord.pcoa.wuni_V2_vaccineonly_US$values$Eigenvalues
+
+#RW-v9
+ord.pcoa.uni_V9_vaccineonly_RW <- ordinate(ps1_V9_vaccineonly_RW, method = "PCoA", distance = "unifrac")
+evals.uni_V9_vaccineonly_RW <- ord.pcoa.uni_V9_vaccineonly_RW$values$Eigenvalues
+
+ord.pcoa.wuni_V9_vaccineonly_RW <- ordinate(ps1_V9_vaccineonly_RW, method = "PCoA", distance = "wunifrac")
+evals.wuni_V9_vaccineonly_RW <- ord.pcoa.wuni_V9_vaccineonly_RW$values$Eigenvalues
+
+#UG-V9
+ord.pcoa.uni_V9_vaccineonly_UG <- ordinate(ps1_V9_vaccineonly_UG, method = "PCoA", distance = "unifrac")
+evals.uni_V9_vaccineonly_UG <- ord.pcoa.uni_V9_vaccineonly_UG$values$Eigenvalues
+
+ord.pcoa.wuni_V9_vaccineonly_UG <- ordinate(ps1_V9_vaccineonly_UG, method = "PCoA", distance = "wunifrac")
+evals.wuni_V9_vaccineonly_UG <- ord.pcoa.wuni_V9_vaccineonly_UG$values$Eigenvalues
+
+#US-V9
+ord.pcoa.uni_V9_vaccineonly_US <- ordinate(ps1_V9_vaccineonly_US, method = "PCoA", distance = "unifrac")
+evals.uni_V9_vaccineonly_US <- ord.pcoa.uni_V9_vaccineonly_US$values$Eigenvalues
+
+ord.pcoa.wuni_V9_vaccineonly_US <- ordinate(ps1_V9_vaccineonly_US, method = "PCoA", distance = "wunifrac")
+evals.wuni_V9_vaccineonly_US <- ord.pcoa.wuni_V9_vaccineonly_US$values$Eigenvalues
+```
+
+### PCOA analysis in V2 stool samples VACCINE ONLY
+```{r ordination-plots, All samples in V2, fig.width=16, fig.height=4}
+## Ordination plots all samples
+# V2-UG UNWeighted Unifrac
+p.pcoa.uni.region_V2_vaccineonly_UG_response <- plot_ordination(ps1_V2_vaccineonly_UG, ord.pcoa.uni_V2_vaccineonly_UG, color = "responses_group", axes = c(1,2)) +
+  geom_point(size = 3) +
+  labs(title = "Unweighted UniFrac Distances ", subtitle = "UG", color = "Immune response") +
+  scale_color_manual(labels = c("High", "Low"), values = c("blue", "red"))+
+  stat_ellipse(type = "norm", linetype = 2) +
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="none",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold"))
+   #annotate("text", x=-0.2, y=0.25, label ="ADONIS\n p = 0.715", col = "black")
+
+p.pcoa.uni.region_V2_vaccineonly_UG_response
+
+## V2-UG Weighted Unifrac
+p.pcoa.wuni.subregion_V2_vaccineonly_UG_response <- plot_ordination(ps1_V2_vaccineonly_UG, ord.pcoa.wuni_V2_vaccineonly_UG, color = "responses_group", axes = c(1,2)) +
+  geom_point(size = 3) +
+  labs(title = "Weighted UniFrac Distances ", subtitle = "UG", color = "Immune response") +
+  scale_color_manual(labels = c("High", "Low"), values = c("blue", "red"))+
+  stat_ellipse(type = "norm", linetype = 2) +
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="bottom",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold")) 
+p.pcoa.wuni.subregion_V2_vaccineonly_UG_response 
+
+p.pcoa.wuni.subregion_V2_vaccineonly_UG_responseA <- p.pcoa.wuni.subregion_V2_vaccineonly_UG_response + theme(legend.position="none")
+
+# V2-US UNWeighted Unifrac
+p.pcoa.uni.region_V2_vaccineonly_US_response <- plot_ordination(ps1_V2_vaccineonly_US, ord.pcoa.uni_V2_vaccineonly_US, color = "responses_group", axes = c(1,2)) +
+  geom_point(size = 3) +
+  labs(title = " ", subtitle = "US", color = "Immune response") +
+  scale_color_manual(labels = c("High", "Low"), values = c("blue", "red"))+
+  stat_ellipse(type = "norm", linetype = 2) +
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="none",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold"))+
+   annotate("text", x=0.4, y=0.3, label ="ADONIS\n p = 0.744", col = "black")
+
+p.pcoa.uni.region_V2_vaccineonly_US_response
+
+## V2-US Weighted Unifrac
+p.pcoa.wuni.subregion_V2_vaccineonly_US_response <- plot_ordination(ps1_V2_vaccineonly_US, ord.pcoa.wuni_V2_vaccineonly_US, color = "responses_group", axes = c(1,2)) +
+  geom_point(size = 3) +
+  labs(title = " ", subtitle = "US", color = "Immune response") +
+  scale_color_manual(labels = c("High", "Low"), values = c("blue", "red"))+
+  stat_ellipse(type = "norm", linetype = 2) +
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="NONE",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold"))+
+  annotate("text", x=0.4, y=0.2, label ="ADONIS\n p = 0.908", col = "black")
+
+p.pcoa.wuni.subregion_V2_vaccineonly_US_response 
+
+PCOA.V2_vaccineonly_response <- ggarrange(
+                                ggarrange(p.pcoa.uni.region_V2_vaccineonly_UG_response, p.pcoa.uni.region_V2_vaccineonly_US_response, align = c("hv"), ncol = 2),
+                             ggarrange(p.pcoa.wuni.subregion_V2_vaccineonly_UG_responseA, p.pcoa.wuni.subregion_V2_vaccineonly_US_response, align = c("hv"),ncol=2),
+              align = c("h"), ncol=1
+                                    )
+PCOA.V2_vaccineonly_response <- annotate_figure(PCOA.V2_vaccineonly_response,top = text_grob("Early Vaccination", face = "bold", size = 14))
+
+# extract the legend from one of the plots
+legend_vaccineonly <- get_legend(p.pcoa.wuni.subregion_V2_vaccineonly_UG_response)
+
+
+b_diversity_v2_vaccineonly_response <- plot_grid(PCOA.V2_vaccineonly_response, legend_vaccineonly, rel_heights = c(1,.1), ncol = 1, labels = c("B", ""))
+
+b_diversity_v2_vaccineonly_response 
+
+```
+
+### PCOA analysis in V9 stool samples VACCINE ONLY
+```{r ordination-plots, All samples in V9, fig.width=16, fig.height=4}
+## Ordination plots all samples
+# Unifrac
+# V9-RW UNWeighted Unifrac
+p.pcoa.uni.region_V9_vaccineonly_RW_response <- plot_ordination(ps1_V9_vaccineonly_RW, ord.pcoa.uni_V9_vaccineonly_RW, color = "responses_group", axes = c(1,2)) +
+  geom_point(size = 3) +
+  labs(title = "  ", subtitle = "RW", color = "Immune response") +
+  scale_color_manual(labels = c("High", "Low"), values = c("blue", "red"))+
+  stat_ellipse(type = "norm", linetype = 2) +
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="none",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold"))+
+   annotate("text", x=0.35, y=0.2, label ="ADONIS\n p = 0.708", col = "black")
+
+p.pcoa.uni.region_V9_vaccineonly_RW_response
+
+## V9-RW Weighted Unifrac
+p.pcoa.wuni.subregion_V9_vaccineonly_RW_response <- plot_ordination(ps1_V9_vaccineonly_RW, ord.pcoa.wuni_V9_vaccineonly_RW, color = "responses_group", axes = c(1,2)) +
+  geom_point(size = 3) +
+  labs(title = "  ", subtitle = "RW", color = "Immune response") +
+  scale_color_manual(labels = c("High", "Low"), values = c("blue", "red"))+
+  stat_ellipse(type = "norm", linetype = 2) +
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="none",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold"))+
+   annotate("text", x=0.3, y=0.15, label ="ADONIS\n p = 0.308", col = "black")
+
+p.pcoa.wuni.subregion_V9_vaccineonly_RW_response
+
+# V9-UG UNWeighted Unifrac
+p.pcoa.uni.region_V9_vaccineonly_UG_response <- plot_ordination(ps1_V9_vaccineonly_UG, ord.pcoa.uni_V9_vaccineonly_UG, color = "responses_group", axes = c(1,2)) +
+  geom_point(size = 3) +
+  labs(title = " ", subtitle = "UG", color = "Immune response") +
+  scale_color_manual(labels = c("High", "Low"), values = c("blue", "red"))+
+  stat_ellipse(type = "norm", linetype = 2) +
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="none",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold"))
+   #annotate("text", x=-0.2, y=0.25, label ="ADONIS\n p = 0.715", col = "black")
+
+p.pcoa.uni.region_V9_vaccineonly_UG_response
+
+## V9-UG Weighted Unifrac
+p.pcoa.wuni.subregion_V9_vaccineonly_UG_response <- plot_ordination(ps1_V9_vaccineonly_UG, ord.pcoa.wuni_V9_vaccineonly_UG, color = "responses_group", axes = c(1,2)) +
+  geom_point(size = 3) +
+  labs(title = " ", subtitle = "UG", color = "Immune response") +
+  scale_color_manual(labels = c("High", "Low"), values = c("blue", "red"))+
+  stat_ellipse(type = "norm", linetype = 2) +
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="bottom",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold")) 
+
+p.pcoa.wuni.subregion_V9_vaccineonly_UG_response 
+
+p.pcoa.wuni.subregion_V9_vaccineonly_UG_responseA <- p.pcoa.wuni.subregion_V9_vaccineonly_UG_response + theme(legend.position="none")
+
+# V9-US UNWeighted Unifrac
+p.pcoa.uni.region_V9_vaccineonly_US_response <- plot_ordination(ps1_V9_vaccineonly_US, ord.pcoa.uni_V9_vaccineonly_US, color = "responses_group", axes = c(1,2)) +
+  geom_point(size = 3) +
+  labs(title = " ", subtitle = "US", color = "Immune response") +
+  scale_color_manual(labels = c("High", "Low"), values = c("blue", "red"))+
+  stat_ellipse(type = "norm", linetype = 2) +
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="none",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold"))+
+   annotate("text", x=0.4, y=0.35, label ="ADONIS\n p = 0.467", col = "black")
+
+p.pcoa.uni.region_V9_vaccineonly_US_response
+
+## V9-US Weighted Unifrac
+p.pcoa.wuni.subregion_V9_vaccineonly_US_response <- plot_ordination(ps1_V9_vaccineonly_US, ord.pcoa.wuni_V9_vaccineonly_US, color = "responses_group", axes = c(1,2)) +
+  geom_point(size = 3) +
+  labs(title = " ", subtitle = "US", color = "Immune response") +
+  scale_color_manual(labels = c("High", "Low"), values = c("blue", "red"))+
+  stat_ellipse(type = "norm", linetype = 2) +
+  geom_hline(yintercept = 0, lty = 2, lwd = 0.1) +
+  geom_vline(xintercept = 0, lty = 2, lwd = 0.1) +
+  theme(legend.position="NONE",
+        plot.subtitle = element_text(hjust = 0.5, face = "bold"))+
+  annotate("text", x=0.3, y=0.2, label ="ADONIS\n p = 0.516", col = "black")
+
+p.pcoa.wuni.subregion_V9_vaccineonly_US_response 
+
+
+pcoa.uni_v9_vaccineonly_response <- ggarrange(p.pcoa.uni.region_V9_vaccineonly_RW_response, p.pcoa.uni.region_V9_vaccineonly_UG_response, p.pcoa.uni.region_V9_vaccineonly_US_response, align = c("hv"), ncol = 3)
+
+
+pcoa.uni_v9_vaccineonly_response <- annotate_figure(pcoa.uni_v9_vaccineonly_response, fig.lab = "      Unweighted UniFrac Distances", fig.lab.size = 14)
+
+p.pcoa.wuni_v9_vaccineonly_response <- ggarrange(p.pcoa.wuni.subregion_V9_vaccineonly_RW_response, p.pcoa.wuni.subregion_V9_vaccineonly_UG_responseA, p.pcoa.wuni.subregion_V9_vaccineonly_US_response, align = c("hv"),ncol=3)
+
+p.pcoa.wuni_v9_vaccineonly_response <- annotate_figure(p.pcoa.wuni_v9_vaccineonly_response, fig.lab = "      Weighted UniFrac Distances", fig.lab.size = 14) 
+
+
+PCOA.V9_vaccineonly_response <- ggarrange(pcoa.uni_v9_vaccineonly_response,
+                             p.pcoa.wuni_v9_vaccineonly_response,
+              align = c("h"), ncol=1
+                                    )
+
+PCOA.V9_vaccineonly_response <- annotate_figure(PCOA.V9_vaccineonly_response,top = text_grob("Late Vaccination", face = "bold", size = 14))
+# extract the legend from one of the plots
+legend_vaccineonly <- get_legend(p.pcoa.wuni.subregion_V9_vaccineonly_UG_response)
+
+
+b_diversity_V9_vaccineonly_response <- plot_grid(PCOA.V9_vaccineonly_response, legend_vaccineonly, rel_heights = c(1,.1), ncol = 1, labels = c("C", ""))
+
+b_diversity_V9_vaccineonly_response 
+
+```
+
+##Figure 6
+```{r, Fig 6,fig.width=15, fig.height=10}
+ #column_title = "Immune response to vaccination regimens in humans"
+
+ggarrange(b_diversity_v2_vaccineonly_response ,                          
+          b_diversity_V9_vaccineonly_response ,
+          ncol = 2, widths = c(1,1.5))
+```
+
+
