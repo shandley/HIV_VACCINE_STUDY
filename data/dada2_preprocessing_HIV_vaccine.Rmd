@@ -1,0 +1,188 @@
+---
+title: 'HIV Vaccine Bacterial Microbiome - Preprocessing'
+author: "Scott Handley"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+## References:
+  ## http://benjjneb.github.io/dada2/tutorial.html
+  ## http://benjjneb.github.io/dada2/bigdata.html
+
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=8,
+                      fig.height=6,
+                      fig.path="./figures/",
+                      dev='pdf',
+                      warning=FALSE,
+                      message=FALSE)
+
+# Load libraries
+library("ShortRead"); packageVersion("ShortRead")
+library("dada2"); packageVersion("dada2")
+library("tidyverse"); packageVersion("tidyverse")
+library("msa"); packageVersion("msa")
+library("phangorn"); packageVersion("phangorn")
+library("phyloseq"); packageVersion("phyloseq")
+
+# Set random seed for reproducibility purposes
+set.seed(100)
+
+```
+###Examine, Filter and trim reads
+
+```{r examine-filter-trim}
+# File parsing
+pathF <- "/mnt/data3/shandley/barouch_HIV_vaccine_16S/raw_data/"
+
+fnFs <- sort(list.files(pathF, pattern=".fastq", full.names = TRUE))
+fnFs
+
+# Extract sample names, assuming filenames have format: SAMPLENAME_XXX.fastq
+# This may be different depending on how the files were named!!!!!
+sample.names <- sapply(strsplit(basename(fnFs), ".fastq"), `[`, 1)
+sample.names
+
+p.qual <- plotQualityProfile(fnFs[1:10], aggregate = TRUE) + ggtitle("Fwd")
+p.qual
+
+# Set filtered file location
+filt_path <- file.path(pathF, "filtered")
+filtFs <- file.path(filt_path, paste0(sample.names, ".filtered.fastq"))
+
+out <- filterAndTrim(fnFs, filtFs,
+                     trimLeft = 12, truncLen = 248,
+                     maxN = 0, maxEE = 2, truncQ = 2, rm.phix=TRUE,
+                     compress=TRUE, multithread=TRUE, verbose = TRUE)
+head(out)
+
+ggplot(as.data.frame(out), aes(x=reads.in, y=reads.out, color="red")) +
+  geom_point(size = 2.5, alpha=0.7) +
+  theme(legend.position = "null") +
+  labs(y="Reads Out", x = "Reads In", title="Reads Pre and Post QC")
+
+```
+##Learn Error Rates
+
+```{r learn-error-rates}
+errF <- learnErrors(filtFs, multithread=TRUE)
+p.err <- plotErrors(errF, nominalQ=TRUE) + ggtitle("Error Rates")
+p.err
+plot(dada2:::checkConvergence(errF), type = "o", col = "firebrick3", main = "Convergence")
+
+```
+## Sequence deduplication, inference and chimera removal
+
+```{r dereplication}
+# Dereplicate
+derepFs <- derepFastq(filtFs, verbose=TRUE)
+names(derepFs) <- sample.names
+
+# Inference
+dadaFs <- dada(derepFs, err=errF, multithread=TRUE)
+
+# Construct sequence table
+seqtab <- makeSequenceTable(dadaFs)
+dim(seqtab)
+
+# Remove Chimeras
+seqtab.nochim <- removeBimeraDenovo(seqtab, method = "consensus", multithread = TRUE)
+
+save.image("./dada2_preprocessing_HIV_vaccine.RData")
+
+```
+##Assign taxonomy
+
+```{r assign-taxonomy}
+# GreenGenes
+taxa.gg <- assignTaxonomy(seqtab.nochim, "/mnt/data1/databases/dada2_taxonomy/gg_13_8_train_set_97.fa.gz", multithread = TRUE)
+unname(head(taxa.gg))
+colnames(taxa.gg) <- c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")
+
+# RDP
+taxa.rdp <- assignTaxonomy(seqtab.nochim, "/mnt/data1/databases/dada2_taxonomy/rdp_train_set_16.fa.gz", multithread = TRUE)
+unname(head(taxa.rdp))
+colnames(taxa.rdp) <- c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus")
+
+# Silva
+taxa.silva <- assignTaxonomy(seqtab.nochim,  "/mnt/data1/databases/dada2_taxonomy/silva_nr_v128_train_set.fa.gz", multithread = TRUE)
+unname(head(taxa.silva))
+colnames(taxa.silva) <- c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus")
+
+# Add species to RDP and Silva
+#RDP
+taxa.rdp.plus <- addSpecies(taxa.rdp, "/mnt/data1/databases/dada2_taxonomy/rdp_species_assignment_16.fa.gz")
+unname(head(taxa.rdp.plus))
+colnames(taxa.rdp.plus) <- c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")
+
+# SILVA
+taxa.silva.plus <- addSpecies(taxa.silva, "/mnt/data1/databases/dada2_taxonomy/silva_species_assignment_v128.fa.gz")
+unname(head(taxa.silva.plus))
+colnames(taxa.silva.plus) <- c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")
+
+save.image("./dada2_preprocessing_HIV_vaccine.RData")
+
+```
+##Construct the phylogenetic tree
+
+```{r construct-phylogeny}
+seqs <- getSequences(seqtab.nochim)
+
+names(seqs) <- seqs # This propagates to the tip labels of the tree
+mult <- msa(seqs, method="ClustalW", type="dna", order="input")
+
+phang.align <- as.phyDat(mult, type="DNA", names=getSequence(seqtab.nochim))
+
+dm <- dist.ml(phang.align)
+treeNJ <- NJ(dm) # Note, tip order != sequence order
+fit = pml(treeNJ, data=phang.align)
+
+fitGTR <- update(fit, k=4, inv=0.2)
+fitGTR <- optim.pml(fitGTR, model="GTR", optInv=TRUE, optGamma=TRUE,
+                       rearrangement = "stochastic", control = pml.control(trace = 0))
+detach("package:phangorn", unload=TRUE)
+
+save.image("./dada2_preprocessing_HIV_vaccine.RData")
+
+```
+##Create phyloseq objects
+
+```{r create-phyloseq}
+# Create PhyloSeq objects
+# Greengenes
+# Strip the r__ prefixes from taxon labels. This is only needed for the GreenGenes taxon annotations
+taxa.gg.fixed <- gsub("k__", "", taxa.gg)
+taxa.gg.fixed <- gsub("p__", "", taxa.gg.fixed)
+taxa.gg.fixed <- gsub("c__", "", taxa.gg.fixed)
+taxa.gg.fixed <- gsub("o__", "", taxa.gg.fixed)
+taxa.gg.fixed <- gsub("f__", "", taxa.gg.fixed)
+taxa.gg.fixed <- gsub("g__", "", taxa.gg.fixed)
+taxa.gg.fixed <- gsub("s__", "", taxa.gg.fixed)
+
+ps0.gg <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows = FALSE), tax_table(taxa.gg.fixed), phy_tree(fitGTR$tree))
+ps0.gg
+
+# RDP
+ps0.rdp <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows = FALSE), tax_table(taxa.rdp.plus), phy_tree(fitGTR$tree))
+ps0.rdp
+
+# Silva
+ps0.silva <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows = FALSE), tax_table(taxa.silva.plus), phy_tree(fitGTR$tree))
+ps0.silva
+
+# Sanity checks
+get_taxa_unique(ps0.gg, "Phylum")
+get_taxa_unique(ps0.rdp, "Phylum")
+get_taxa_unique(ps0.silva, "Phylum")
+
+# Save RDS files for downstream analysis
+saveRDS(ps0.gg, file = "./ps0.HIV_vaccine.gg.RDS")
+saveRDS(ps0.rdp, file = "./ps0.HIV_vaccine.rdp.RDS")
+saveRDS(ps0.silva, file = "./ps0.HIV_vaccine.silva.RDS")
+
+save.image("./dada2_preprocessing_HIV_vaccine.RData")
+
+```

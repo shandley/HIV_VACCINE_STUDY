@@ -1,0 +1,39 @@
+Dear Olive, all,
+The responder calls are already calculated, but in a different type of dataset than the one that Olive used to merge the microbiome and immunogenicity data together with. Fortunately, the responder definitions are quite simple and hopefully should be able to be implemented into the data without involving another separate data set merge.
+
+There are 3 rules which are consistent across ELISA, ADCP and ELISPOT assays:
+
+1. All baseline data are “non-responder” by definition.
+2. If baseline readout < threshold, then post-vaccination value > threshold = “responder”, otherwise it is “non-responder”
+3. If baseline readout >= threshold, then post-vaccination value > 3*baseline readout = “responder”, otherwise it is “non-responder”
+
+The threshold values per assay-antigen are below:
+ELISA:
+Clade A (92UG037.1): 625
+Clade B (1990a): 156.25
+Clade C (Con C): 625
+Clade C (C97ZA.012): 156.25
+Mos1: 78.125
+
+ADCP:
+Clade A (92UG037.1): 5.16
+Clade B (1990a): 6.43
+Clade C (Con C): 6.49
+Clade C (C97ZA.012): 4.32
+Mos1: 4.28
+
+ELISPOT:
+Env peptide pool Mos1: 73 (em1)
+Pol peptide pool Mos1: 112 (em2)
+Gag peptide pool Mos1: 87 (gm1)
+Env peptide pool Mos2: 70 (gm2)
+Pol peptide pool Mos2: 63 (pm1)
+Gag peptide pool Mos2: 55 (pm2)
+Env peptide pool PTE: 100
+Pol peptide pool PTE: 105
+Gag peptide pool PTE: 181
+
+I hope this is clear, but if anything isn’t or you want to double check then just let me know.
+
+Best regards,
+Daniel
