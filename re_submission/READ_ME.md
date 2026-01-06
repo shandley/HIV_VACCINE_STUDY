@@ -139,7 +139,7 @@ Scott A. Handley; shandley@wustl.edu Megan T. Baldridge; mbaldridge@wustl.edu Da
 
 ## License
 
-[LICENSE INFORMATION]
+MIT License
 
 ## Citation
 
