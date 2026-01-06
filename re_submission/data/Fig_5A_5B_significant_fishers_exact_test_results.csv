@@ -1,0 +1,12 @@
+Phylum,Sub_region,Assay,NR,R,PValue,Significance,IsSignificant,Total,Comparison
+Bacillota,RW vs US,Clade C,0/1334 vs 4/1011,-,0.03443218586584166,*,TRUE,2345,RW vs US (NR)
+Bacillota,RW vs US,Clade C,-,0/1334 vs 5/1011,0.014811282002094216,*,TRUE,2345,RW vs US (R)
+Bacillota,RW vs US,Clade C (Con C),-,2/1334 vs 7/1011,0.044761734577958415,*,TRUE,2345,RW vs US (R)
+Bacillota,RW vs US,Mos 1,-,2/1334 vs 14/1011,4.3156153801784486e-4,*,TRUE,2345,RW vs US (R)
+Bacillota,RW vs US,Env Mos2,0/1334 vs 17/1011,-,5.686511263484487e-7,*,TRUE,2345,RW vs US (NR)
+Bacillota,RW vs US,Gag Mos2,-,0/1334 vs 8/1011,0.0011748970682204124,*,TRUE,2345,RW vs US (R)
+Bacillota,RW vs US,Pol Mos1,-,0/1334 vs 13/1011,1.7011163318186005e-5,*,TRUE,2345,RW vs US (R)
+Bacillota,RW vs US,Gag PTE,0/1334 vs 4/1011,-,0.03443218586584166,*,TRUE,2345,RW vs US (NR)
+Bacillota,RW vs US,Gag PTE,-,0/1334 vs 5/1011,0.014811282002094216,*,TRUE,2345,RW vs US (R)
+Bacteroidota,RW vs US,Env Mos2,0/420 vs 5/202,-,0.003492552078475206,*,TRUE,622,RW vs US (NR)
+Bacteroidota,RW vs US,Gag Mos2,-,0/420 vs 4/202,0.010900995881301391,*,TRUE,622,RW vs US (R)
