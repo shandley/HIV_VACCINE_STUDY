@@ -1,0 +1,10 @@
+Phylum,Sub_region,Assay,NR,R,PValue,Significance,IsSignificant,Comparison,Total
+Bacteroidota,RW,Clade A,17,5,0.0155264626809657,**,TRUE,NR vs R,420
+Bacteroidota,RW,Env Mos1,0,7,0.0152362428819934,**,TRUE,NR vs R,420
+Bacteroidota,RW,Gag Mos2,7,0,0.0152362428819934,**,TRUE,NR vs R,420
+Bacteroidota,RW,Env2 PTE,5,17,0.0155264626809657,**,TRUE,NR vs R,420
+Bacteroidota,RW,Gag PTE,7,0,0.0152362428819934,**,TRUE,NR vs R,420
+Bacillota,US,Mos 1,0,14,0.000116662999147373,****,TRUE,NR vs R,1011
+Bacillota,US,Env Mos2,17,6,0.0336819705419793,**,TRUE,NR vs R,1011
+Bacillota,US,Pol Mos1,0,13,0.000234845656600272,****,TRUE,NR vs R,1011
+Bacteroidota,US,Mos 1,0,7,0.0148209207945267,**,TRUE,NR vs R,202
